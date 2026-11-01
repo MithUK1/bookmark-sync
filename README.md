@@ -17,7 +17,8 @@ Firefox: News                  Firefox: Recipes, News, Weather
 - First sync of a browser adds everything it has and removes nothing. After that, adds and deletes in any browser reach the others.
 - Removes duplicates (optional). The same address is kept once, preferring the bookmarks bar. `www.`, a trailing slash and tracking codes do not make two addresses different.
 - Backs up automatically before changes, and on demand. Each backup is a `.html` file (imports into any browser) and a `.json` file (restore it from the window).
-- **Use as source** makes one browser the master, and the others change to match.
+- Keeps the same folders in the same order in every browser, so the bookmarks bars and folders look alike. If you reorder a folder in one browser, that order is used.
+- **View master list** shows the one list every browser is kept to match.
 - Never touches browser pages such as `chrome://` or `about:`.
 - Nothing runs between syncs. The browser starts the helper when it needs it, and it exits straight after.
 
@@ -37,7 +38,7 @@ Firefox: News                  Firefox: Recipes, News, Weather
 
 **Updating:** run a newer `BookmarkSync.ps1` the same way. It compares versions, changes only what differs (program file, launchers, browser registration, icon, shortcuts, new settings) and says what it changed. Settings, bookmarks and backups are kept, and an older copy changes nothing. **Settings > Repair install** rewrites everything if the install breaks.
 
-Each browser syncs a few seconds after a bookmark change, when it starts, and every 5 minutes. The toolbar button shows the last sync, has **Sync now**, and opens the Bookmark Sync window.
+Each browser syncs a few seconds after a bookmark change, when it starts, and on a timer (every minute by default). A browser learns of a change made in another browser at its next check. The toolbar button shows the last sync, has **Sync now**, and opens the Bookmark Sync window.
 
 ## Configuration
 
@@ -46,6 +47,7 @@ Settings are in the window under **Settings**, and in `%LOCALAPPDATA%\BookmarkSy
 | Setting | Default | What it does |
 | --- | --- | --- |
 | `RemoveDuplicates` | `true` | Keep one copy of each address, preferring the bookmarks bar. |
+| `PollMinutes` | `1` | How often each browser checks for changes (1 to 60). Reload the extension after changing it. |
 | `AutoBackupsToKeep` | `40` | How many automatic backups to keep (5 to 500). Backups you make are always kept. |
 | `WindowLeft`, `WindowTop` | `-1` | Where the window was last placed. `-1` centres it. |
 
@@ -57,7 +59,7 @@ Everything else lives in the same folder: `state.json` (master list and what eac
 powershell -File tests\BookmarkSync.Tests.ps1
 ```
 
-Covers the address rules, duplicates, merging between browsers, Use as source, backups and restore, the settings file and the message format the browsers use.
+Covers the address rules, duplicates, merging between browsers, folder order, backups and restore, the settings file and the message format the browsers use.
 
 ## Privacy
 
@@ -67,7 +69,7 @@ Bookmarks never leave this computer. The extension talks only to the Bookmark Sy
 | --- | --- |
 | `bookmarks` | Read your bookmarks and change them to match the master list. |
 | `nativeMessaging` | Talk to the Bookmark Sync helper on this computer. |
-| `alarms` | Sync every 5 minutes. |
+| `alarms` | Check for changes on a timer. |
 | `storage` | Remember the last sync result for the toolbar button. |
 
 ## Notes

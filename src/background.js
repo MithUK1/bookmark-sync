@@ -11,7 +11,7 @@ const SEP = '\x1f';
 const KEY_SEP = '\x1e';
 const ALLOWED_SCHEMES = ['http:', 'https:', 'ftp:', 'file:', 'javascript:'];
 const TRACKING = /^(utm_|fbclid$|gclid$|mc_eid$)/;
-const POLL_MINUTES = 5;
+const DEFAULT_POLL_MINUTES = 1;
 const CHANGE_DELAY_MS = 4000;
 
 // Browser differences in one place: the ids of the two areas that sync
@@ -69,6 +69,17 @@ function normUrl(url) {
   return `//${host}${path}${query}`;
 }
 
+// An item's name inside its folder's order list. Bookmarks go by address,
+// folders by name. Same rules as Get-BookmarkToken and Get-FolderToken in
+// BookmarkSync.ps1.
+function bookmarkToken(url) {
+  return `b|${normUrl(url)}`;
+}
+
+function folderToken(name) {
+  return `f|${name}`;
+}
+
 // A bookmark's identity: its folder path plus its normalised address.
 function keyOf(path, url) {
   return path.join(SEP) + KEY_SEP + normUrl(url);
@@ -76,12 +87,25 @@ function keyOf(path, url) {
 
 // Walks one folder, collecting bookmarks and sub-folders with their paths.
 function collect(node, path, out) {
+  const items = [];
+  const listed = new Set();
+  out.order.push({ path, items });
   for (const child of node.children ?? []) {
     if (child.url !== undefined) {
       if (syncable(child.url)) {
         out.bookmarks.push({ id: child.id, url: child.url, title: child.title ?? '', path, index: child.index });
+        const token = bookmarkToken(child.url);
+        if (!listed.has(token)) {
+          listed.add(token);
+          items.push(token);
+        }
       }
     } else if (child.children) {
+      const token = folderToken(child.title);
+      if (!listed.has(token)) {
+        listed.add(token);
+        items.push(token);
+      }
       const childPath = [...path, child.title];
       out.folders.push({ id: child.id, path: childPath });
       collect(child, childPath, out);
@@ -92,7 +116,7 @@ function collect(node, path, out) {
 // Reads every bookmark and folder in the two areas that sync.
 async function snapshot() {
   const [tree] = await api.bookmarks.getTree();
-  const out = { bookmarks: [], folders: [] };
+  const out = { bookmarks: [], folders: [], order: [] };
   for (const root of tree.children) {
     const label = ROOT_LABEL[root.id];
     if (label) collect(root, [label], out);
@@ -106,6 +130,7 @@ function payload(snap) {
     browser: BROWSER,
     bookmarks: snap.bookmarks.map(({ url, title, path, index }) => ({ url, title, path, index })),
     folders: snap.folders.map((folder) => folder.path),
+    order: snap.order,
   };
 }
 
@@ -138,14 +163,14 @@ async function fetchMaster(first) {
     parts.push(reply.data);
   }
   const master = JSON.parse(joinParts(parts));
-  return { bookmarks: master.bookmarks ?? [], folders: master.folders ?? [] };
+  return { bookmarks: master.bookmarks ?? [], folders: master.folders ?? [], order: master.order ?? [] };
 }
 
 // Changes this browser's bookmarks to match the master list: removes what
 // is not in it, adds what is missing, creates folders as needed, then
 // removes folders left empty that the master does not have.
 async function apply(target) {
-  const stats = { created: 0, deleted: 0, errors: 0 };
+  const stats = { created: 0, deleted: 0, moved: 0, errors: 0 };
   const wanted = new Map(target.bookmarks.map((bm) => [keyOf(bm.path, bm.url), bm]));
   const wantedFolders = new Set(target.folders.map((folder) => folder.join(SEP)));
 
@@ -213,7 +238,65 @@ async function apply(target) {
   }
 
   await removeEmptyFolders(wantedFolders, stats);
+  await reorder(target.order, stats);
   return stats;
+}
+
+// Moves one item to a position in its folder and checks where it landed.
+// Chrome counts the target position before the item is lifted out, so a
+// move forward within the same folder can land one place early; if so, it
+// is moved once more.
+async function moveTo(id, parentId, index) {
+  await api.bookmarks.move(id, { parentId, index });
+  let children = await api.bookmarks.getChildren(parentId);
+  let actual = children.findIndex((child) => child.id === id);
+  if (actual !== index && actual >= 0) {
+    await api.bookmarks.move(id, { parentId, index: actual < index ? index + 1 : index - 1 });
+    children = await api.bookmarks.getChildren(parentId);
+  }
+  return children;
+}
+
+// Puts each folder's items in the master's order. Items the master does
+// not list (browser pages that never sync) are left where they are.
+async function reorder(order, stats) {
+  const [tree] = await api.bookmarks.getTree();
+  const folders = new Map();
+  function walk(node, path) {
+    folders.set(path.join(SEP), node);
+    for (const child of node.children ?? []) {
+      if (child.url === undefined && child.children) walk(child, [...path, child.title]);
+    }
+  }
+  for (const root of tree.children) {
+    const label = ROOT_LABEL[root.id];
+    if (label) walk(root, [label]);
+  }
+
+  for (const entry of order) {
+    const folder = folders.get(entry.path.join(SEP));
+    if (!folder) continue;
+    try {
+      let children = folder.children ?? [];
+      // Item ids by token, first copy only.
+      const idOf = new Map();
+      for (const child of children) {
+        const token = child.url !== undefined ? (syncable(child.url) ? bookmarkToken(child.url) : null) : folderToken(child.title);
+        if (token && !idOf.has(token)) idOf.set(token, child.id);
+      }
+      const wanted = entry.items.filter((token) => idOf.has(token)).map((token) => idOf.get(token));
+      const wantedSet = new Set(wanted);
+      for (let i = 0; i < wanted.length; i++) {
+        const current = children.filter((child) => wantedSet.has(child.id));
+        if (current[i].id === wanted[i]) continue;
+        const index = children.findIndex((child) => child.id === current[i].id);
+        children = await moveTo(wanted[i], folder.id, index);
+        stats.moved++;
+      }
+    } catch {
+      stats.errors++;
+    }
+  }
 }
 
 // Removes empty folders the master list does not have, deepest first.
@@ -269,6 +352,7 @@ async function sync() {
     do {
       again = false;
       const first = await callHost({ type: 'sync', ...payload(await snapshot()) });
+      await setPollMinutes(first.pollMinutes);
       if (first.unchanged) {
         await setStatus(true, 'Up to date');
         continue;
@@ -281,8 +365,8 @@ async function sync() {
       } finally {
         applying = false;
       }
-      await callHost({ type: 'ack', ...payload(await snapshot()), stats });
-      await setStatus(true, `Synced, ${stats.created} added, ${stats.deleted} removed`);
+      await callHost({ type: 'ack', ...payload(await snapshot()), stats, revision: first.revision });
+      await setStatus(true, `Synced, ${stats.created} added, ${stats.deleted} removed, ${stats.moved} moved`);
     } while (again);
   } catch (err) {
     await setStatus(false, describeError(err));
@@ -303,7 +387,19 @@ for (const event of ['onCreated', 'onRemoved', 'onChanged', 'onMoved', 'onImport
   api.bookmarks[event]?.addListener(scheduleSync);
 }
 
-api.alarms.create('poll', { periodInMinutes: POLL_MINUTES });
+// Sets how often this browser checks, from the helper's setting. The alarm
+// is only recreated when the period changes, as recreating restarts its clock.
+async function setPollMinutes(minutes) {
+  const wanted = Number.isFinite(minutes) && minutes >= 1 ? minutes : DEFAULT_POLL_MINUTES;
+  const existing = await api.alarms.get('poll');
+  if (!existing || existing.periodInMinutes !== wanted) {
+    await api.alarms.create('poll', { periodInMinutes: wanted });
+  }
+  await api.storage.local.set({ pollMinutes: wanted });
+}
+
+// Use the last known period when the background script starts.
+api.storage.local.get('pollMinutes').then((stored) => setPollMinutes(stored.pollMinutes));
 api.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'poll') sync();
 });

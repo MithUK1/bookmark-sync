@@ -96,17 +96,6 @@ Assert-Equal 'https://b.test https://c.test' (Get-MasterUrls $state) 'delete in 
 $null = Invoke-BrowserSync -State $state -Browser 'chrome' -Snapshot $chrome -Config $config
 Assert-Equal 'https://b.test https://c.test' (Get-MasterUrls $state) 'old copy in chrome does not bring a delete back'
 
-# ---- Use as source ----
-$state.mirror_from = 'chrome'
-$null = Invoke-BrowserSync -State $state -Browser 'chrome' -Snapshot $chrome -Config $config
-Assert-Equal 'https://a.test https://b.test' (Get-MasterUrls $state) 'source browser replaces the master'
-Assert-Equal 'edge' ($state.pending_overwrite -join ',') 'other browsers marked to change'
-
-$edgeOwn = New-TestSnapshot @((New-TestBookmark 'https://z.test' @('toolbar')))
-$null = Invoke-BrowserSync -State $state -Browser 'edge' -Snapshot $edgeOwn -Config $config
-Assert-Equal 'https://a.test https://b.test' (Get-MasterUrls $state) 'marked browser takes the master, its own changes ignored'
-Assert-Equal '' ($state.pending_overwrite -join ',') 'mark cleared after it is applied'
-
 # ---- State file round trip ----
 Save-SyncState $state
 $loaded = Read-SyncState
@@ -122,7 +111,7 @@ Assert-Equal $true ($html -match 'HREF="https://a.test"') 'html backup holds the
 
 $state.master.bookmarks.Clear()
 Restore-Backup -State $state -Name $name -Config $config
-Assert-Equal 'https://a.test https://b.test' (Get-MasterUrls $state) 'restore brings the master back'
+Assert-Equal 'https://b.test https://c.test' (Get-MasterUrls $state) 'restore brings the master back'
 Assert-Equal 'chrome,edge' (($state.pending_overwrite | Sort-Object) -join ',') 'restore marks every browser to change'
 $listed = @(Get-BackupList | Where-Object { $_.Name -eq $name })[0]
 Assert-Equal 'Manual' $listed.Type 'backup list reads the type'
@@ -133,6 +122,75 @@ $old = Join-Path $Script:BackupDir 'bookmarks-20250101-120000-auto.json'
 Set-Content -Path $old -Value '{}'
 Assert-Equal 'All browsers' (@(Get-BackupList | Where-Object { $_.Name -eq 'bookmarks-20250101-120000-auto' })[0].Browser) 'older backup names still read'
 Remove-Item -Path $old
+
+# ---- Order and folders ----
+function New-OrderSnapshot {
+    param([object[]]$Bookmarks, [object[]]$Folders = @(), [object[]]$Order)
+    return [pscustomobject]@{ bookmarks = $Bookmarks; folders = $Folders; order = $Order }
+}
+function New-OrderEntry {
+    param([string[]]$Path, [string[]]$Items)
+    return [pscustomobject]@{ path = $Path; items = $Items }
+}
+function Get-MasterOrder {
+    param($State, [string]$Folder)
+    return ((ConvertTo-OrderMap $State.master.order)[$Folder] -join ',')
+}
+
+$ord = New-SyncState
+$a = New-TestBookmark 'https://a.test' @('toolbar'); $a.index = 0
+$b = New-TestBookmark 'https://b.test' @('toolbar'); $b.index = 1
+$c = New-TestBookmark 'https://c.test' @('toolbar'); $c.index = 2
+$one = New-OrderSnapshot @($a, $b, $c) @() @(
+    (New-OrderEntry @('toolbar') @('b|//a.test', 'b|//b.test', 'b|//c.test')),
+    (New-OrderEntry @('other') @()))
+$null = Invoke-BrowserSync -State $ord -Browser 'chrome' -Snapshot $one -Config $config
+Assert-Equal 'b|//a.test,b|//b.test,b|//c.test' (Get-MasterOrder $ord 'toolbar') 'first browser sets the master order'
+Complete-BrowserSync -State $ord -Browser 'chrome' -Snapshot $one -Stats @{ created = 0; deleted = 0; moved = 0; errors = 0 } -Revision $ord.revision
+
+# A second browser with the same bookmarks in another order is told to reorder.
+$two = New-OrderSnapshot @($c, $a, $b) @() @(
+    (New-OrderEntry @('toolbar') @('b|//c.test', 'b|//a.test', 'b|//b.test')),
+    (New-OrderEntry @('other') @()))
+$result = Invoke-BrowserSync -State $ord -Browser 'edge' -Snapshot $two -Config $config
+Assert-Equal $false $result.Unchanged 'different order needs changes'
+Assert-Equal 'b|//a.test,b|//b.test,b|//c.test' (Get-MasterOrder $ord 'toolbar') 'first sync of a browser does not change the master order'
+Complete-BrowserSync -State $ord -Browser 'edge' -Snapshot $one -Stats @{ created = 0; deleted = 0; moved = 3; errors = 0 } -Revision $ord.revision
+$result = Invoke-BrowserSync -State $ord -Browser 'edge' -Snapshot $one -Config $config
+Assert-Equal $true $result.Unchanged 'matching order and revision is unchanged'
+
+# The user reorders in edge: that order wins and chrome follows.
+$moved = New-OrderSnapshot @($c, $a, $b) @() @(
+    (New-OrderEntry @('toolbar') @('b|//c.test', 'b|//a.test', 'b|//b.test')),
+    (New-OrderEntry @('other') @()))
+$null = Invoke-BrowserSync -State $ord -Browser 'edge' -Snapshot $moved -Config $config
+Assert-Equal 'b|//c.test,b|//a.test,b|//b.test' (Get-MasterOrder $ord 'toolbar') 'a reorder in one browser reaches the master'
+$result = Invoke-BrowserSync -State $ord -Browser 'chrome' -Snapshot $one -Config $config
+Assert-Equal $false $result.Unchanged 'the other browser must follow the new order'
+Assert-Equal 'b|//c.test,b|//a.test,b|//b.test' (Get-MasterOrder $ord 'toolbar') 'following browser does not undo the reorder'
+
+# A new bookmark lands after the one before it.
+$d = New-TestBookmark 'https://d.test' @('toolbar'); $d.index = 1
+$withNew = New-OrderSnapshot @($c, $d, $a, $b) @() @(
+    (New-OrderEntry @('toolbar') @('b|//c.test', 'b|//d.test', 'b|//a.test', 'b|//b.test')),
+    (New-OrderEntry @('other') @()))
+Complete-BrowserSync -State $ord -Browser 'chrome' -Snapshot $moved -Stats @{ created = 0; deleted = 0; moved = 3; errors = 0 } -Revision $ord.revision
+$null = Invoke-BrowserSync -State $ord -Browser 'chrome' -Snapshot $withNew -Config $config
+Assert-Equal 'b|//c.test,b|//d.test,b|//a.test,b|//b.test' (Get-MasterOrder $ord 'toolbar') 'new bookmark is placed after its neighbour'
+
+# Order survives save, load and restore.
+Save-SyncState $ord
+$reloaded = Read-SyncState
+Assert-Equal (Get-MasterOrder $ord 'toolbar') (Get-MasterOrder $reloaded 'toolbar') 'order survives save and load'
+Assert-Equal $ord.revision $reloaded.revision 'revision survives save and load'
+$orderBackup = New-Backup -State $reloaded -Reason 'manual' -IncludeSeen -Config $config
+$reloaded.master.order.Clear()
+$before = $reloaded.revision
+Restore-Backup -State $reloaded -Name $orderBackup -Config $config
+Assert-Equal 'b|//c.test,b|//d.test,b|//a.test,b|//b.test' (Get-MasterOrder $reloaded 'toolbar') 'restore brings the order back'
+Assert-Equal ($before + 1) $reloaded.revision 'restore bumps the revision'
+
+# Marking all browsers to change after a restore.
 
 # ---- Escaping in the html backup ----
 $escaped = ConvertTo-BookmarkHtml @([ordered]@{ url = 'https://x.test/?a=1&b=2'; title = 'Tom & Jerry <3'; path = [string[]]@('other'); index = 0 })

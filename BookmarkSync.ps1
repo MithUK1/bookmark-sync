@@ -40,7 +40,7 @@ param(
 # ============================================================================
 
 $Script:AppTitle   = 'Bookmark Sync'
-$Script:AppVersion = '0.1.3'
+$Script:AppVersion = '0.2.0'
 $Script:VersionTag = "v$($Script:AppVersion) - MUK1"
 
 # The name each browser uses to find this helper, and the extensions allowed
@@ -89,10 +89,12 @@ $Script:AutoBackupGap = 600
 # replies are sent in pieces of this many bytes (before base64).
 $Script:PartBytes = 700000
 
+$Script:RootLabels = @{ toolbar = 'Bookmarks bar'; other = 'Other bookmarks' }
 $Script:BrowserNames = @{ chrome = 'Chrome'; edge = 'Edge'; firefox = 'Firefox' }
 
 $Script:DefaultConfig = [ordered]@{
     RemoveDuplicates  = $true
+    PollMinutes       = 1
     AutoBackupsToKeep = 40
     WindowLeft        = -1
     WindowTop         = -1
@@ -189,6 +191,8 @@ function Read-Config {
         }
     }
 
+    if ($config.PollMinutes -lt 1) { $config.PollMinutes = 1 }
+    if ($config.PollMinutes -gt 60) { $config.PollMinutes = 60 }
     if ($config.AutoBackupsToKeep -lt 5) { $config.AutoBackupsToKeep = 5 }
     if ($config.AutoBackupsToKeep -gt 500) { $config.AutoBackupsToKeep = 500 }
     return @{ Config = $config; Problem = $problem }
@@ -203,11 +207,11 @@ function Save-Config {
 # A blank master list and no browsers yet.
 function New-SyncState {
     return @{
-        master           = @{ bookmarks = (ConvertTo-List $null); folders = (ConvertTo-List $null) }
-        browsers         = @{}
+        master            = @{ bookmarks = (ConvertTo-List $null); folders = (ConvertTo-List $null); order = (ConvertTo-List $null) }
+        revision          = 1
+        browsers          = @{}
         pending_overwrite = (ConvertTo-List $null)
-        mirror_from      = $null
-        last_auto_backup = 0
+        last_auto_backup  = 0
     }
 }
 
@@ -222,20 +226,23 @@ function Read-SyncState {
     if ($raw.master) {
         $state.master.bookmarks = ConvertTo-List $raw.master.bookmarks
         $state.master.folders = ConvertTo-List $raw.master.folders
+        $state.master.order = ConvertTo-List $raw.master.order
     }
+    if ($raw.revision) { $state.revision = [int]$raw.revision }
     if ($raw.browsers) {
         foreach ($property in $raw.browsers.PSObject.Properties) {
             $entry = $property.Value
             $state.browsers[$property.Name] = @{
                 last         = $(if ($null -eq $entry.last) { $null } else { ConvertTo-List $entry.last })
                 last_folders = $(if ($null -eq $entry.last_folders) { $null } else { ConvertTo-List $entry.last_folders })
+                last_order   = $(if ($null -eq $entry.last_order) { $null } else { ConvertTo-List $entry.last_order })
+                applied      = [int]$entry.applied
                 seen         = [double]$entry.seen
                 snapshot     = $entry.snapshot
             }
         }
     }
     $state.pending_overwrite = ConvertTo-List $raw.pending_overwrite
-    $state.mirror_from = $raw.mirror_from
     if ($raw.last_auto_backup) { $state.last_auto_backup = [double]$raw.last_auto_backup }
     return $state
 }
@@ -383,7 +390,14 @@ function ConvertTo-CleanSnapshot {
             $folders.Add([string[]]$path.ToArray())
         }
     }
-    return @{ bookmarks = $bookmarks; folders = $folders }
+    $order = [System.Collections.Generic.List[object]]::new()
+    foreach ($entry in (ConvertTo-List $Snapshot.order)) {
+        $path = ConvertTo-List $entry.path
+        if ($path.Count -gt 0 -and ($path[0] -eq 'toolbar' -or $path[0] -eq 'other')) {
+            $order.Add([ordered]@{ path = [string[]]$path.ToArray(); items = [string[]](ConvertTo-List $entry.items).ToArray() })
+        }
+    }
+    return @{ bookmarks = $bookmarks; folders = $folders; order = $order }
 }
 
 # Where a bookmark sits, best first: loose on the bookmarks bar, in a bar
@@ -447,6 +461,164 @@ function Test-SameKeys {
     return $true
 }
 
+# The name a bookmark or folder goes by inside its parent's order list.
+# Bookmarks are told apart by normalised address, folders by name.
+function Get-BookmarkToken {
+    param([Parameter(Mandatory)][string]$Url)
+    return 'b|' + (Get-NormalUrl $Url)
+}
+
+function Get-FolderToken {
+    param([Parameter(Mandatory)][string]$Name)
+    return 'f|' + $Name
+}
+
+# Turns a list of { path, items } into a map of joined folder path to its
+# ordered list of names.
+function ConvertTo-OrderMap {
+    param($Order)
+    $map = @{}
+    foreach ($entry in (ConvertTo-List $Order)) {
+        $path = [string[]](ConvertTo-List $entry.path).ToArray()
+        if ($path.Count -eq 0) { continue }
+        $items = [System.Collections.Generic.List[string]]::new()
+        foreach ($item in (ConvertTo-List $entry.items)) { $items.Add([string]$item) }
+        $map[$path -join $Script:PathSep] = $items
+    }
+    return ,$map
+}
+
+# The reverse, sorted by folder path so the state file stays tidy.
+function ConvertTo-OrderList {
+    param([Parameter(Mandatory)]$Map)
+    $list = [System.Collections.Generic.List[object]]::new()
+    foreach ($key in ($Map.Keys | Sort-Object)) {
+        $list.Add([ordered]@{ path = [string[]]$key.Split($Script:PathSep); items = [string[]]$Map[$key].ToArray() })
+    }
+    return ,$list
+}
+
+# True when two lists hold the same names in the same order.
+function Test-SameSequence {
+    param($First, $Second)
+    if ($First.Count -ne $Second.Count) { return $false }
+    for ($i = 0; $i -lt $First.Count; $i++) {
+        if ($First[$i] -cne $Second[$i]) { return $false }
+    }
+    return $true
+}
+
+# Updates the master order for each folder a browser reported.
+#
+# A browser that has moved things around since its last sync wins for that
+# folder: its order becomes the master's. Otherwise the master order stays
+# and anything new from the browser is slotted in after the item it follows
+# in that browser.
+function Merge-FolderOrder {
+    param(
+        [Parameter(Mandatory)]$MasterOrder,
+        [Parameter(Mandatory)]$CurrentOrder,
+        $LastOrder
+    )
+    foreach ($key in $CurrentOrder.Keys) {
+        $current = $CurrentOrder[$key]
+        if (-not $MasterOrder.ContainsKey($key)) {
+            $MasterOrder[$key] = [System.Collections.Generic.List[string]]::new($current)
+            continue
+        }
+        $master = $MasterOrder[$key]
+        $reordered = $false
+        if ($LastOrder -and $LastOrder.ContainsKey($key)) {
+            $last = $LastOrder[$key]
+            $inCurrent = [System.Collections.Generic.HashSet[string]]::new($current)
+            $inLast = [System.Collections.Generic.HashSet[string]]::new($last)
+            $keptNow = [System.Collections.Generic.List[string]]::new()
+            foreach ($item in $current) { if ($inLast.Contains($item)) { $keptNow.Add($item) } }
+            $keptBefore = [System.Collections.Generic.List[string]]::new()
+            foreach ($item in $last) { if ($inCurrent.Contains($item)) { $keptBefore.Add($item) } }
+            $reordered = -not (Test-SameSequence $keptNow $keptBefore)
+        }
+        if ($reordered) {
+            $merged = [System.Collections.Generic.List[string]]::new($current)
+            $inMerged = [System.Collections.Generic.HashSet[string]]::new($current)
+            foreach ($item in $master) { if ($inMerged.Add($item)) { $merged.Add($item) } }
+            $MasterOrder[$key] = $merged
+        } else {
+            $inMaster = [System.Collections.Generic.HashSet[string]]::new($master)
+            for ($i = 0; $i -lt $current.Count; $i++) {
+                if ($inMaster.Contains($current[$i])) { continue }
+                $at = 0
+                for ($j = $i - 1; $j -ge 0; $j--) {
+                    $position = $master.IndexOf($current[$j])
+                    if ($position -ge 0) { $at = $position + 1; break }
+                }
+                $master.Insert($at, $current[$i])
+                [void]$inMaster.Add($current[$i])
+            }
+        }
+    }
+}
+
+# Makes the order lists match what is actually in the master: every folder
+# has one, it holds exactly the bookmarks and sub-folders in that folder,
+# and anything without a place yet goes at the end (bookmarks in the order
+# their browser had them, then folders by name).
+function Complete-FolderOrder {
+    param(
+        [Parameter(Mandatory)]$Order,
+        [Parameter(Mandatory)]$Map,
+        [Parameter(Mandatory)]$Folders
+    )
+    $children = @{ ('toolbar') = [System.Collections.Generic.List[object]]::new(); ('other') = [System.Collections.Generic.List[object]]::new() }
+    foreach ($key in $Folders.Keys) {
+        if (-not $children.ContainsKey($key)) { $children[$key] = [System.Collections.Generic.List[object]]::new() }
+    }
+    foreach ($bookmark in ($Map.Values | Sort-Object { $_.index })) {
+        $parent = $bookmark.path -join $Script:PathSep
+        if (-not $children.ContainsKey($parent)) { $children[$parent] = [System.Collections.Generic.List[object]]::new() }
+        $children[$parent].Add((Get-BookmarkToken $bookmark.url))
+    }
+    foreach ($key in ($Folders.Keys | Sort-Object)) {
+        $path = $Folders[$key]
+        $parent = ([string[]]$path[0..($path.Count - 2)]) -join $Script:PathSep
+        if (-not $children.ContainsKey($parent)) { $children[$parent] = [System.Collections.Generic.List[object]]::new() }
+        $children[$parent].Add((Get-FolderToken $path[$path.Count - 1]))
+    }
+
+    foreach ($key in @($Order.Keys)) {
+        if (-not $children.ContainsKey($key)) { $Order.Remove($key) }
+    }
+    foreach ($key in $children.Keys) {
+        $present = [System.Collections.Generic.HashSet[string]]::new()
+        foreach ($token in $children[$key]) { [void]$present.Add([string]$token) }
+        $final = [System.Collections.Generic.List[string]]::new()
+        $placed = [System.Collections.Generic.HashSet[string]]::new()
+        if ($Order.ContainsKey($key)) {
+            foreach ($token in $Order[$key]) {
+                if ($present.Contains($token) -and $placed.Add($token)) { $final.Add($token) }
+            }
+        }
+        foreach ($token in $children[$key]) {
+            if ($placed.Add([string]$token)) { $final.Add([string]$token) }
+        }
+        $Order[$key] = $final
+    }
+}
+
+# True when the browser's order already matches the master's, folder by
+# folder. Only names the browser actually has are compared.
+function Test-OrderMatches {
+    param([Parameter(Mandatory)]$MasterOrder, [Parameter(Mandatory)]$CurrentOrder)
+    foreach ($key in $CurrentOrder.Keys) {
+        if (-not $MasterOrder.ContainsKey($key)) { continue }
+        $inCurrent = [System.Collections.Generic.HashSet[string]]::new($CurrentOrder[$key])
+        $wanted = [System.Collections.Generic.List[string]]::new()
+        foreach ($item in $MasterOrder[$key]) { if ($inCurrent.Contains($item)) { $wanted.Add($item) } }
+        if (-not (Test-SameSequence $wanted $CurrentOrder[$key])) { return $false }
+    }
+    return $true
+}
+
 # Returns a browser's record, creating it the first time it syncs.
 function Get-BrowserEntry {
     param(
@@ -454,7 +626,7 @@ function Get-BrowserEntry {
         [Parameter(Mandatory)][string]$Browser
     )
     if (-not $State.browsers.ContainsKey($Browser)) {
-        $State.browsers[$Browser] = @{ last = $null; last_folders = $null; seen = 0; snapshot = $null }
+        $State.browsers[$Browser] = @{ last = $null; last_folders = $null; last_order = $null; applied = 0; seen = 0; snapshot = $null }
     }
     return $State.browsers[$Browser]
 }
@@ -476,12 +648,14 @@ function Get-SortedFolders {
 #
 # First sync: everything the browser has is added, nothing is removed.
 # After that: what was added or removed in the browser since its last sync
-# is added to or removed from the master. A browser marked to be overwritten
-# gives up its own changes and takes the master as it is. A browser chosen
-# as the source replaces the master outright.
+# is added to or removed from the master, and a folder the browser has
+# reordered takes that order. A browser marked to be overwritten (after a
+# restore) gives up its own changes and takes the master as it is.
 #
-# Returns Unchanged when the browser already matches the master, in which
-# case its sync is recorded here and nothing needs sending back.
+# Returns Unchanged when the browser already matches the master in what it
+# holds and the order of it, in which case its sync is recorded here and
+# nothing needs sending back. Revision goes up each time the master changes
+# and is what a browser reports back once it has applied it.
 function Invoke-BrowserSync {
     param(
         [Parameter(Mandatory)]$State,
@@ -494,31 +668,29 @@ function Invoke-BrowserSync {
     $entry = Get-BrowserEntry $State $Browser
     $current = ConvertTo-BookmarkMap $snap.bookmarks
     $currentFolders = ConvertTo-FolderMap $snap.folders
+    $currentOrder = ConvertTo-OrderMap $snap.order
     $entry.snapshot = @{ bookmarks = @($current.Values); folders = @($currentFolders.Values) }
     $entry.seen = Get-UnixTime
 
+    $before = ConvertTo-Json -InputObject $State.master -Depth 8 -Compress
     $master = ConvertTo-BookmarkMap $State.master.bookmarks
     $masterFolders = ConvertTo-FolderMap $State.master.folders
+    $masterOrder = ConvertTo-OrderMap $State.master.order
     $oldKeys = @($master.Keys)
     $firstSync = $null -eq $entry.last
     $name = $Script:BrowserNames[$Browser]
+    $activity = $false
 
     if ($State.pending_overwrite.Contains($Browser)) {
         [void]$State.pending_overwrite.Remove($Browser)
         $note = 'changed to match the master list'
-    } elseif ($State.mirror_from -eq $Browser) {
-        New-Backup -State $State -Reason 'before-source' -Browser $Browser -IncludeSeen -Config $Config | Out-Null
-        $master = [ordered]@{}
-        foreach ($key in $current.Keys) { $master[$key] = $current[$key] }
-        $masterFolders = @{}
-        foreach ($key in $currentFolders.Keys) { $masterFolders[$key] = $currentFolders[$key] }
-        $State.mirror_from = $null
-        $State.pending_overwrite = ConvertTo-List ($State.browsers.Keys | Where-Object { $_ -ne $Browser })
-        $note = 'used as the source, the other browsers will be changed to match'
+        $activity = $true
     } else {
         $last = @{}
         foreach ($key in (ConvertTo-List $entry.last)) { $last[$key] = $true }
         $lastFolders = ConvertTo-FolderMap $entry.last_folders
+        $lastOrder = $null
+        if ($null -ne $entry.last_order) { $lastOrder = ConvertTo-OrderMap $entry.last_order }
 
         $added = 0
         $removed = 0
@@ -540,11 +712,14 @@ function Invoke-BrowserSync {
         foreach ($key in $lastFolders.Keys) {
             if (-not $currentFolders.ContainsKey($key)) { $masterFolders.Remove($key) }
         }
+        Merge-FolderOrder -MasterOrder $masterOrder -CurrentOrder $currentOrder -LastOrder $lastOrder
         $note = "$added added and $removed removed in this browser"
+        $activity = ($added -gt 0) -or ($removed -gt 0)
     }
 
     if ($Config.RemoveDuplicates) { $master = Select-UniqueBookmarks $master }
     Add-ParentFolders -Map $master -Folders $masterFolders
+    Complete-FolderOrder -Order $masterOrder -Map $master -Folders $masterFolders
 
     $changed = -not (Test-SameKeys $master.Keys $oldKeys) -or -not (Test-SameKeys $master.Keys $current.Keys)
     $stale = (Get-UnixTime) - $State.last_auto_backup -gt $Script:AutoBackupGap
@@ -553,36 +728,52 @@ function Invoke-BrowserSync {
         $State.last_auto_backup = Get-UnixTime
     }
 
-    $State.master = @{ bookmarks = (ConvertTo-List $master.Values); folders = (Get-SortedFolders $masterFolders) }
-    Write-AppLog "${name}: sync, $note, master list now $($master.Count)"
+    $State.master = @{
+        bookmarks = (ConvertTo-List $master.Values)
+        folders   = (Get-SortedFolders $masterFolders)
+        order     = (ConvertTo-OrderList $masterOrder)
+    }
+    if ((ConvertTo-Json -InputObject $State.master -Depth 8 -Compress) -ne $before) {
+        $State.revision++
+        $activity = $true
+    }
+    if ($activity) { Write-AppLog "${name}: sync, $note, master list now $($master.Count)" }
 
-    $unchanged = (Test-SameKeys $master.Keys $current.Keys) -and (Test-SameKeys $masterFolders.Keys $currentFolders.Keys)
+    $unchanged = (Test-SameKeys $master.Keys $current.Keys) -and
+        (Test-SameKeys $masterFolders.Keys $currentFolders.Keys) -and
+        (Test-OrderMatches -MasterOrder $masterOrder -CurrentOrder $currentOrder)
     if ($unchanged) {
+        $entry.applied = $State.revision
         $entry.last = ConvertTo-List $current.Keys
         $entry.last_folders = ConvertTo-List $currentFolders.Values
+        $entry.last_order = $snap.order
     }
     return @{ Unchanged = $unchanged }
 }
 
 # Records what a browser looks like after it has applied the master list,
-# so its next sync can tell what the user changed since.
+# so its next sync can tell what the user changed since. Revision is the
+# one it was sent, not whatever the master has moved on to since.
 function Complete-BrowserSync {
     param(
         [Parameter(Mandatory)]$State,
         [Parameter(Mandatory)][string]$Browser,
         [Parameter(Mandatory)]$Snapshot,
-        $Stats
+        $Stats,
+        [int]$Revision
     )
     $snap = ConvertTo-CleanSnapshot $Snapshot
     $entry = Get-BrowserEntry $State $Browser
     $current = ConvertTo-BookmarkMap $snap.bookmarks
     $entry.last = ConvertTo-List $current.Keys
     $entry.last_folders = $snap.folders
+    $entry.last_order = $snap.order
+    $entry.applied = $Revision
     $entry.snapshot = @{ bookmarks = @($current.Values); folders = $snap.folders }
     $entry.seen = Get-UnixTime
 
-    if ($Stats -and ($Stats.created -or $Stats.deleted -or $Stats.errors)) {
-        Write-AppLog "$($Script:BrowserNames[$Browser]): applied, $([int]$Stats.created) added, $([int]$Stats.deleted) removed, $([int]$Stats.errors) could not be changed"
+    if ($Stats -and ($Stats.created -or $Stats.deleted -or $Stats.moved -or $Stats.errors)) {
+        Write-AppLog "$($Script:BrowserNames[$Browser]): applied, $([int]$Stats.created) added, $([int]$Stats.deleted) removed, $([int]$Stats.moved) moved, $([int]$Stats.errors) could not be changed"
     }
 }
 
@@ -729,8 +920,12 @@ function Restore-Backup {
     $path = Join-Path $Script:BackupDir ([System.IO.Path]::GetFileName($Name) + '.json')
     $payload = Get-Content -Path $path -Raw -Encoding UTF8 | ConvertFrom-Json
     New-Backup -State $State -Reason 'before-restore' -IncludeSeen -Config $Config | Out-Null
-    $State.master = @{ bookmarks = (ConvertTo-List $payload.master.bookmarks); folders = (ConvertTo-List $payload.master.folders) }
-    $State.mirror_from = $null
+    $State.master = @{
+        bookmarks = (ConvertTo-List $payload.master.bookmarks)
+        folders   = (ConvertTo-List $payload.master.folders)
+        order     = (ConvertTo-List $payload.master.order)
+    }
+    $State.revision = [int]$State.revision + 1
     $State.pending_overwrite = ConvertTo-List $State.browsers.Keys
     Write-AppLog "Restored backup $Name, master list now $($State.master.bookmarks.Count)"
 }
@@ -839,15 +1034,15 @@ function Invoke-HostRequest {
             $result = Invoke-BrowserSync -State $state -Browser $browser -Snapshot $Request -Config $config
             Save-SyncState $state
             if ($result.Unchanged) {
-                $script:reply = @{ ok = $true; unchanged = $true }
+                $script:reply = @{ ok = $true; unchanged = $true; revision = $state.revision; pollMinutes = $config.PollMinutes }
             } else {
                 $text = ConvertTo-Json -InputObject $state.master -Depth 6 -Compress
                 Write-FileSafely -Path (Get-PlanFile $browser) -Text $text
                 $parts = Split-ReplyParts $text
-                $script:reply = @{ ok = $true; unchanged = $false; part = 0; parts = $parts.Count; data = $parts[0] }
+                $script:reply = @{ ok = $true; unchanged = $false; revision = $state.revision; pollMinutes = $config.PollMinutes; part = 0; parts = $parts.Count; data = $parts[0] }
             }
         } elseif ($type -eq 'ack') {
-            Complete-BrowserSync -State $state -Browser $browser -Snapshot $Request -Stats $Request.stats
+            Complete-BrowserSync -State $state -Browser $browser -Snapshot $Request -Stats $Request.stats -Revision ([int]$Request.revision)
             Save-SyncState $state
             Remove-Item -Path (Get-PlanFile $browser) -ErrorAction SilentlyContinue
             $script:reply = @{ ok = $true }
@@ -1285,9 +1480,10 @@ $Script:HelpText = @'
 USING IT
 Install the Bookmark Sync extension in each browser you want kept in step
 (Chrome, Edge, Firefox). Each browser syncs a few seconds after you add,
-move or delete a bookmark, when it starts, and every 5 minutes. Nothing
-runs in the background in between, the browser starts the helper when it
-needs it.
+move or delete a bookmark, when it starts, and every minute (change this
+in Settings). Nothing runs in the background in between, the browser
+starts the helper when it needs it. A browser only learns about a change
+made in another browser at its next check, so allow up to a minute.
 
 The first time a browser syncs, everything it has is added to the master
 list and nothing is removed. After that, adds and deletes in any browser
@@ -1307,9 +1503,8 @@ backups are kept. Running an older copy changes nothing.
 
 BROWSERS
 The list shows each browser that has synced, how many bookmarks it had and
-when. Use as source makes the selected browser the master: on its next
-sync its bookmarks replace the master list and the other browsers are
-changed to match. A backup is taken first.
+when. View master list shows the one list every browser is kept to match,
+folders and order included.
 
 BACKUPS (UNDO)
 A backup is taken automatically before changes, at most every 10 minutes,
@@ -1326,8 +1521,10 @@ bookmarks. Addresses that differ only by www, a trailing slash or tracking
 codes count as the same.
 
 LIMITS
-Bookmarks are added at the end of their folder, so exact order is not
-synced. The Firefox bookmarks menu and other bookmarks count as one area.
+All browsers are kept with the same folders and the same order in each
+folder. If you reorder a folder in one browser, that order is used. Edited
+titles of existing bookmarks are not synced yet. The Firefox bookmarks
+menu and other bookmarks count as one area.
 Browser pages such as chrome:// and about: are never synced or changed.
 
 SETTINGS
@@ -1380,7 +1577,7 @@ function Show-SettingsWindow {
 
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "$($Script:AppTitle) - Settings"
-    $form.ClientSize = New-Object System.Drawing.Size(440, 470)
+    $form.ClientSize = New-Object System.Drawing.Size(440, 530)
     $form.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterParent
     Set-FormChrome $form
 
@@ -1413,34 +1610,55 @@ function Show-SettingsWindow {
     $form.Controls.Add($keepTail)
     $form.Controls.Add((New-SmallPrint 'Older automatic backups are removed. Ones you make are always kept.' 16 158 400))
 
-    $form.Controls.Add((New-Heading 'Help and files' 16 194))
-    $help = New-StyledButton -Text 'Help' -X 16 -Y 220 -Width 90
+    $form.Controls.Add((New-Heading 'Checking for changes' 16 194))
+    $pollLabel = New-Object System.Windows.Forms.Label
+    $pollLabel.Text = 'Check every'
+    $pollLabel.AutoSize = $true
+    $pollLabel.Location = New-Object System.Drawing.Point(16, 222)
+    $form.Controls.Add($pollLabel)
+    $script:pollBox = New-Object System.Windows.Forms.NumericUpDown
+    $script:pollBox.Minimum = 1
+    $script:pollBox.Maximum = 60
+    $script:pollBox.Value = $script:settingsConfig.PollMinutes
+    $script:pollBox.Location = New-Object System.Drawing.Point(104, 219)
+    $script:pollBox.Width = 64
+    $form.Controls.Add($script:pollBox)
+    $pollTail = New-Object System.Windows.Forms.Label
+    $pollTail.Text = 'minutes'
+    $pollTail.AutoSize = $true
+    $pollTail.Location = New-Object System.Drawing.Point(174, 222)
+    $form.Controls.Add($pollTail)
+    $form.Controls.Add((New-SmallPrint 'How soon a browser notices changes made in another. Reload the extension after changing it.' 16 248 400))
+
+    $form.Controls.Add((New-Heading 'Help and files' 16 254))
+    $help = New-StyledButton -Text 'Help' -X 16 -Y 280 -Width 90
     $help.Add_Click({ Show-HelpWindow $form })
     $form.Controls.Add($help)
-    $openSettings = New-StyledButton -Text 'Open settings file' -X 114 -Y 220 -Width 140
+    $openSettings = New-StyledButton -Text 'Open settings file' -X 114 -Y 280 -Width 140
     $openSettings.Add_Click({
         if (-not (Test-Path $Script:ConfigFile)) { Save-Config $script:settingsConfig }
         Start-Process notepad.exe -ArgumentList "`"$($Script:ConfigFile)`""
     })
     $form.Controls.Add($openSettings)
-    $openLog = New-StyledButton -Text 'Open log' -X 262 -Y 220 -Width 90
+    $openLog = New-StyledButton -Text 'Open log' -X 262 -Y 280 -Width 90
     $openLog.Add_Click({
         if (Test-Path $Script:LogPath) { Start-Process notepad.exe -ArgumentList "`"$($Script:LogPath)`"" }
     })
     $form.Controls.Add($openLog)
 
-    $form.Controls.Add((New-Heading 'Reset' 16 270))
-    $defaults = New-StyledButton -Text 'Restore defaults' -X 16 -Y 296 -Width 140
+    $form.Controls.Add((New-Heading 'Reset' 16 330))
+    $defaults = New-StyledButton -Text 'Restore defaults' -X 16 -Y 356 -Width 140
     $defaults.Add_Click({
         if (Confirm-Action 'Put every setting back to its default? Bookmarks and backups are not touched.' 'Restore defaults') {
             $script:dedupeBox.Checked = $Script:DefaultConfig.RemoveDuplicates
             $script:keepBox.Value = $Script:DefaultConfig.AutoBackupsToKeep
+            $script:pollBox.Value = $Script:DefaultConfig.PollMinutes
             $script:settingsConfig.WindowLeft = -1
             $script:settingsConfig.WindowTop = -1
         }
     })
     $form.Controls.Add($defaults)
-    $remove = New-StyledButton -Text 'Remove all app data' -X 164 -Y 296 -Width 160 -Warning
+    $remove = New-StyledButton -Text 'Remove all app data' -X 164 -Y 356 -Width 160 -Warning
     $remove.Add_Click({
         $message = "This takes Bookmark Sync off this computer:`r`n`r`n" +
             "- the browsers stop being able to sync (remove the extension yourself)`r`n" +
@@ -1458,7 +1676,7 @@ function Show-SettingsWindow {
         }
     })
     $form.Controls.Add($remove)
-    $repair = New-StyledButton -Text 'Repair install' -X 332 -Y 296 -Width 92
+    $repair = New-StyledButton -Text 'Repair install' -X 332 -Y 356 -Width 92
     $repair.Add_Click({
         try {
             $changes = Sync-Install -Force
@@ -1469,12 +1687,13 @@ function Show-SettingsWindow {
         }
     })
     $form.Controls.Add($repair)
-    $form.Controls.Add((New-SmallPrint 'Restore defaults resets settings only. Remove all app data uninstalls. Repair install fixes a broken install.' 16 334 410))
+    $form.Controls.Add((New-SmallPrint 'Restore defaults resets settings only. Remove all app data uninstalls. Repair install fixes a broken install.' 16 394 410))
 
-    $save = New-StyledButton -Text 'Save' -X 16 -Y 400 -Width 90 -Primary
+    $save = New-StyledButton -Text 'Save' -X 16 -Y 460 -Width 90 -Primary
     $save.Add_Click({
         $script:settingsConfig.RemoveDuplicates = $script:dedupeBox.Checked
         $script:settingsConfig.AutoBackupsToKeep = [int]$script:keepBox.Value
+        $script:settingsConfig.PollMinutes = [int]$script:pollBox.Value
         try {
             Save-Config $script:settingsConfig
             Write-AppLog 'Settings saved'
@@ -1486,7 +1705,7 @@ function Show-SettingsWindow {
     $form.Controls.Add($save)
     $form.AcceptButton = $save
 
-    $close = New-StyledButton -Text 'Close' -X 314 -Y 400
+    $close = New-StyledButton -Text 'Close' -X 314 -Y 460
     $close.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
     $form.Controls.Add($close)
     $form.CancelButton = $close
@@ -1498,6 +1717,99 @@ function Show-SettingsWindow {
 # ============================================================================
 # Region: Main window
 # ============================================================================
+
+# Shows the master list as a tree: the same folders and order every browser
+# is kept to. A filter box narrows it to matching titles and addresses.
+function Show-MasterWindow {
+    param($Owner)
+    try {
+        $state = Read-SyncState
+    } catch {
+        Show-Error "The master list could not be read. $($_.Exception.Message)"
+        return
+    }
+    $bookmarks = @($state.master.bookmarks)
+    $orderMap = ConvertTo-OrderMap $state.master.order
+    # Bookmarks by folder path and address token, for looking up titles.
+    $byToken = @{}
+    foreach ($bookmark in $bookmarks) {
+        $folder = ([string[]]@($bookmark.path)) -join $Script:PathSep
+        $byToken[$folder + $Script:KeySep + (Get-BookmarkToken $bookmark.url)] = $bookmark
+    }
+    $roots = @($orderMap.Keys | Where-Object { -not $_.Contains($Script:PathSep) } | Sort-Object)
+
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = "$($Script:AppTitle) - Master list"
+    $form.ClientSize = New-Object System.Drawing.Size(600, 560)
+    $form.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterParent
+    Set-FormChrome $form
+
+    $count = New-Object System.Windows.Forms.Label
+    $count.AutoSize = $true
+    $count.ForeColor = $Script:ColorMutedText
+    $count.Location = New-Object System.Drawing.Point(16, 20)
+    $count.Text = "$($bookmarks.Count) bookmarks in $(@($state.master.folders).Count) folders"
+    $form.Controls.Add($count)
+
+    $filterBox = New-Object System.Windows.Forms.TextBox
+    $filterBox.Location = New-Object System.Drawing.Point(16, 46)
+    $filterBox.Width = 568
+    $form.Controls.Add($filterBox)
+
+    $tree = New-Object System.Windows.Forms.TreeView
+    $tree.Location = New-Object System.Drawing.Point(16, 78)
+    $tree.Size = New-Object System.Drawing.Size(568, 410)
+    $tree.ShowNodeToolTips = $true
+    $form.Controls.Add($tree)
+
+    # Adds one folder's items, in master order, under a parent node.
+    $addFolder = $null
+    $addFolder = {
+        param($Nodes, [string]$Folder, [string]$Filter)
+        $seen = @{}
+        foreach ($token in @($orderMap[$Folder])) {
+            $seen[$token] = $true
+            if ($token.StartsWith('f|')) {
+                $name = $token.Substring(2)
+                $node = New-Object System.Windows.Forms.TreeNode($name)
+                & $addFolder $node.Nodes ($Folder + $Script:PathSep + $name) $Filter
+                if (-not $Filter -or $node.Nodes.Count -gt 0) { [void]$Nodes.Add($node) }
+            } else {
+                $bookmark = $byToken[$Folder + $Script:KeySep + $token]
+                if (-not $bookmark) { continue }
+                $title = [string]$bookmark.title
+                if (-not $title) { $title = [string]$bookmark.url }
+                if ($Filter -and $title.IndexOf($Filter, [StringComparison]::OrdinalIgnoreCase) -lt 0 -and ([string]$bookmark.url).IndexOf($Filter, [StringComparison]::OrdinalIgnoreCase) -lt 0) { continue }
+                $node = New-Object System.Windows.Forms.TreeNode($title)
+                $node.ToolTipText = [string]$bookmark.url
+                [void]$Nodes.Add($node)
+            }
+        }
+    }
+    $fill = {
+        $tree.BeginUpdate()
+        $tree.Nodes.Clear()
+        foreach ($root in $roots) {
+            $node = New-Object System.Windows.Forms.TreeNode($Script:RootLabels[$root])
+            if (-not $node.Text) { $node.Text = $root }
+            & $addFolder $node.Nodes $root $filterBox.Text.Trim()
+            [void]$tree.Nodes.Add($node)
+            if ($filterBox.Text.Trim()) { $node.ExpandAll() } else { $node.Expand() }
+        }
+        $tree.EndUpdate()
+    }
+    $filterBox.Add_TextChanged($fill)
+    & $fill
+
+    $form.Controls.Add((New-SmallPrint 'Read only. Hover a bookmark to see its address. Type above to filter.' 16 496 568))
+
+    $close = New-StyledButton -Text 'Close' -X 494 -Y 520
+    $close.Add_Click({ $form.Close() })
+    $form.Controls.Add($close)
+    $form.CancelButton = $close
+
+    [void]$form.ShowDialog($Owner)
+}
 
 # Fills the browser list from the state file.
 function Update-BrowserList {
@@ -1513,8 +1825,7 @@ function Update-BrowserList {
         $count = 0
         if ($entry.snapshot -and $entry.snapshot.bookmarks) { $count = @($entry.snapshot.bookmarks).Count }
         $next = ''
-        if ($state.mirror_from -eq $browser) { $next = 'Becomes the source' }
-        elseif ($state.pending_overwrite.Contains($browser)) { $next = 'Changes to match' }
+        if ($state.pending_overwrite.Contains($browser)) { $next = 'Changes to match' }
 
         $label = $Script:BrowserNames[$browser]
         if (-not $label) { $label = $browser }
@@ -1580,33 +1891,11 @@ function Show-MainWindow {
     $script:browserList = New-CardList -X 16 -Y 44 -Width 528 -Height 110 -Columns @(
         @('Browser', 110), @('Bookmarks', 90), @('Last sync', 120), @('Next sync', 186))
     $form.Controls.Add($script:browserList)
-    $form.Controls.Add((New-SmallPrint 'Each browser syncs a few seconds after a bookmark change, when it starts, and every 5 minutes.' 16 158 400))
+    $form.Controls.Add((New-SmallPrint 'Each browser syncs a few seconds after a bookmark change, when it starts, and on a timer (Settings).' 16 158 380))
 
-    $useSource = New-StyledButton -Text 'Use as source' -X 424 -Y 160 -Width 120
-    $useSource.Add_Click({
-        if ($script:browserList.SelectedItems.Count -eq 0) {
-            Set-Status 'Pick a browser in the list first.' $Script:ColorWarningFg
-            return
-        }
-        $browser = $script:browserList.SelectedItems[0].Tag
-        $label = $Script:BrowserNames[$browser]
-        $message = "On $label's next sync, its bookmarks replace the master list and the other browsers are changed to match.`r`n`r`nA backup is taken first. Carry on?"
-        if (-not (Confirm-Action $message 'Use as source')) { return }
-        try {
-            $null = Invoke-WithStateLock {
-                $state = Read-SyncState
-                $state.mirror_from = $browser
-                $state.pending_overwrite = ConvertTo-List ($state.pending_overwrite | Where-Object { $_ -ne $browser })
-                Save-SyncState $state
-            }
-            Write-AppLog "$label chosen as the source for its next sync"
-            Set-Status "Complete - $label becomes the source on its next sync." $Script:ColorCurrentFg
-            Update-BrowserList
-        } catch {
-            Show-Error "Could not set the source. $($_.Exception.Message)"
-        }
-    })
-    $form.Controls.Add($useSource)
+    $viewMaster = New-StyledButton -Text 'View master list' -X 404 -Y 160 -Width 140
+    $viewMaster.Add_Click({ Show-MasterWindow $form })
+    $form.Controls.Add($viewMaster)
 
     $form.Controls.Add((New-Heading 'Backups' 16 206))
     $script:backupList = New-CardList -X 16 -Y 230 -Width 528 -Height 200 -Columns @(
