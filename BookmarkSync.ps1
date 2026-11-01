@@ -40,7 +40,7 @@ param(
 # ============================================================================
 
 $Script:AppTitle   = 'Bookmark Sync'
-$Script:AppVersion = '0.1.2'
+$Script:AppVersion = '0.1.3'
 $Script:VersionTag = "v$($Script:AppVersion) - MUK1"
 
 # The name each browser uses to find this helper, and the extensions allowed
@@ -911,33 +911,29 @@ function Set-FileIfNeeded {
     Add-Change $Changed $Change
 }
 
-# Points a shortcut at the window launcher, only when it is missing or
-# points somewhere else.
+# Makes a shortcut that opens the window, only when it is missing or
+# differs. The Desktop and Start menu ones run the installed app through
+# the launcher; the one beside the downloaded copy runs that copy, so it
+# also installs or upgrades when that copy is newer.
 function Set-ShortcutIfNeeded {
-    param([string]$Folder, $Changed)
+    param(
+        [string]$Folder,
+        [Parameter(Mandatory)][string]$Target,
+        [Parameter(Mandatory)][string]$Arguments,
+        $Changed
+    )
     if (-not $Folder -or -not (Test-Path -LiteralPath $Folder)) { return }
     $file = Join-Path $Folder "$($Script:AppTitle).lnk"
     $shell = New-Object -ComObject WScript.Shell
     $shortcut = $shell.CreateShortcut($file)
-    $wantArgs = "`"$($Script:LaunchFile)`""
     $wantIcon = "$($Script:IconFile),0"
-    if (-not $script:forceInstall -and (Test-Path -LiteralPath $file) -and $shortcut.Arguments -eq $wantArgs -and $shortcut.IconLocation -eq $wantIcon -and $shortcut.TargetPath -match 'wscript\.exe$') { return }
-    $shortcut.TargetPath = 'wscript.exe'
-    $shortcut.Arguments = $wantArgs
+    if (-not $script:forceInstall -and (Test-Path -LiteralPath $file) -and $shortcut.Arguments -eq $Arguments -and $shortcut.IconLocation -eq $wantIcon -and $shortcut.TargetPath -eq $Target) { return }
+    $shortcut.TargetPath = $Target
+    $shortcut.Arguments = $Arguments
     $shortcut.IconLocation = $wantIcon
     $shortcut.Description = 'Open Bookmark Sync'
     $shortcut.Save()
     Add-Change $Changed 'shortcuts'
-}
-
-# The folders that get a shortcut: Desktop, Start menu, and the folder this
-# copy was run from (not the app folder itself).
-function Get-ShortcutFolders {
-    $folders = [System.Collections.Generic.List[string]]::new()
-    $folders.Add([Environment]::GetFolderPath('Desktop'))
-    $folders.Add([Environment]::GetFolderPath('Programs'))
-    if ($PSScriptRoot -and $PSScriptRoot -ne $Script:DataDir) { $folders.Add($PSScriptRoot) }
-    return ,$folders
 }
 
 # Brings this computer in line with this version of the script, changing
@@ -1002,7 +998,18 @@ function Sync-Install {
         Add-Change $changed 'icon'
     }
 
-    foreach ($folder in (Get-ShortcutFolders)) { Set-ShortcutIfNeeded -Folder $folder -Changed $changed }
+    # Desktop and Start menu open the installed app. The shortcut in the
+    # folder this copy was run from opens that copy instead.
+    $wscript = Join-Path $env:SystemRoot 'System32\wscript.exe'
+    $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $installedArgs = "`"$($Script:LaunchFile)`""
+    foreach ($folder in [Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs')) {
+        Set-ShortcutIfNeeded -Folder $folder -Target $wscript -Arguments $installedArgs -Changed $changed
+    }
+    if ($PSScriptRoot -and $PSScriptRoot -ne $Script:DataDir) {
+        $sourceArgs = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$PSCommandPath`""
+        Set-ShortcutIfNeeded -Folder $PSScriptRoot -Target $powershell -Arguments $sourceArgs -Changed $changed
+    }
 
     # Settings: create from the defaults if missing, otherwise add only
     # settings new in this version. Never change the user's values. A file

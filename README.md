@@ -28,7 +28,7 @@ Firefox: News                  Firefox: Recipes, News, Weather
 
 ## Install
 
-1. Run `BookmarkSync.ps1` (right-click, Run with PowerShell). It installs itself for your user, no admin rights, adds a **Bookmark Sync** shortcut to the Desktop, the Start menu and the folder you ran it from, and opens the Bookmark Sync window.
+1. Run `BookmarkSync.ps1` (right-click, Run with PowerShell). It installs itself for your user, no admin rights, adds a **Bookmark Sync** shortcut to the Desktop and the Start menu (these open the installed app) and one in the folder you ran it from (this opens that copy, so a newer download upgrades when you use it), and opens the Bookmark Sync window.
 2. Build the extension: run `build.ps1`. It writes `dist\chromium` and `dist\firefox`.
 3. Add the extension to each browser:
    - **Chrome:** `chrome://extensions`, turn on Developer mode, Load unpacked, pick `dist\chromium`.
