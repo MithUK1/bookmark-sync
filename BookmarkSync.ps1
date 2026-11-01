@@ -28,7 +28,11 @@
 
 param(
     # Started by a browser to answer one request over standard input and output.
-    [switch]$NativeHost
+    [switch]$NativeHost,
+    # Rewrite every installed piece, to repair an install.
+    [switch]$Install,
+    # Remove Bookmark Sync from this computer.
+    [switch]$Uninstall
 )
 
 # ============================================================================
@@ -36,7 +40,7 @@ param(
 # ============================================================================
 
 $Script:AppTitle   = 'Bookmark Sync'
-$Script:AppVersion = '0.1.0'
+$Script:AppVersion = '0.1.1'
 $Script:VersionTag = "v$($Script:AppVersion) - MUK1"
 
 # The name each browser uses to find this helper, and the extensions allowed
@@ -61,6 +65,8 @@ $Script:LogPath         = Join-Path $Script:DataDir 'BookmarkSync.log'
 $Script:InstalledScript = Join-Path $Script:DataDir 'BookmarkSync.ps1'
 $Script:LauncherFile    = Join-Path $Script:DataDir 'BookmarkSyncHost.cmd'
 $Script:IconFile        = Join-Path $Script:DataDir 'BookmarkSync.ico'
+$Script:LaunchFile      = Join-Path $Script:DataDir 'launch.vbs'
+$Script:RegKey          = 'HKCU:\Software\BookmarkSync'
 $Script:LogMaxLines     = 1000
 
 # Where each browser looks for native helpers registered for this user.
@@ -867,7 +873,7 @@ function Invoke-NativeHost {
 # Opens the Bookmark Sync window as its own process. Started through WMI so
 # the browser does not close it when the helper exits.
 function Start-DetachedWindow {
-    $command = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$($Script:InstalledScript)`""
+    $command = "wscript.exe `"$($Script:LaunchFile)`""
     Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $command } | Out-Null
 }
 
@@ -875,20 +881,82 @@ function Start-DetachedWindow {
 # Region: Install, upgrade and removal
 # ============================================================================
 
-# Reads the version stamp from the installed copy, or null if none.
+# Reads the installed version stamp, or null if not installed.
 function Get-InstalledVersion {
-    if (-not (Test-Path $Script:InstalledScript)) { return $null }
-    $match = Select-String -Path $Script:InstalledScript -Pattern "^\`$Script:AppVersion = '([0-9.]+)'" | Select-Object -First 1
-    if (-not $match) { return $null }
-    return [version]$match.Matches[0].Groups[1].Value
+    try {
+        return [version](Get-ItemProperty -Path $Script:RegKey -Name 'Version' -ErrorAction Stop).Version
+    } catch {
+        return $null
+    }
 }
 
-# Writes the launcher the browsers start, the two helper descriptions they
-# read, and the registry entries that point each browser at them. Safe to
-# run again at any time, it only puts things back as they should be.
-function Register-NativeHost {
+# Adds a change to the list once, for the "updated" note.
+function Add-Change {
+    param($List, [string]$Text)
+    if (-not $List.Contains($Text)) { $List.Add($Text) }
+}
+
+# Writes text only when the file is missing or different.
+function Set-FileIfNeeded {
+    param([string]$Path, [string]$Text, [string]$Change, $Changed)
+    if (-not $script:forceInstall -and (Test-Path -LiteralPath $Path) -and ([System.IO.File]::ReadAllText($Path) -ceq $Text)) { return }
+    Write-FileSafely -Path $Path -Text $Text
+    Add-Change $Changed $Change
+}
+
+# Points a shortcut at the window launcher, only when it is missing or
+# points somewhere else.
+function Set-ShortcutIfNeeded {
+    param([string]$Folder, $Changed)
+    if (-not $Folder -or -not (Test-Path -LiteralPath $Folder)) { return }
+    $file = Join-Path $Folder "$($Script:AppTitle).lnk"
+    $shell = New-Object -ComObject WScript.Shell
+    $shortcut = $shell.CreateShortcut($file)
+    $wantArgs = "`"$($Script:LaunchFile)`""
+    $wantIcon = "$($Script:IconFile),0"
+    if (-not $script:forceInstall -and (Test-Path -LiteralPath $file) -and $shortcut.Arguments -eq $wantArgs -and $shortcut.IconLocation -eq $wantIcon -and $shortcut.TargetPath -match 'wscript\.exe$') { return }
+    $shortcut.TargetPath = 'wscript.exe'
+    $shortcut.Arguments = $wantArgs
+    $shortcut.IconLocation = $wantIcon
+    $shortcut.Description = 'Open Bookmark Sync'
+    $shortcut.Save()
+    Add-Change $Changed 'shortcuts'
+}
+
+# The folders that get a shortcut: Desktop, Start menu, and the folder this
+# copy was run from (not the app folder itself).
+function Get-ShortcutFolders {
+    $folders = [System.Collections.Generic.List[string]]::new()
+    $folders.Add([Environment]::GetFolderPath('Desktop'))
+    $folders.Add([Environment]::GetFolderPath('Programs'))
+    if ($PSScriptRoot -and $PSScriptRoot -ne $Script:DataDir) { $folders.Add($PSScriptRoot) }
+    return ,$folders
+}
+
+# Brings this computer in line with this version of the script, changing
+# only what differs: program file, launchers, helper descriptions, browser
+# registration, icon, shortcuts and the version stamp. Settings, bookmarks
+# and backups are never touched. Returns the list of what changed.
+function Sync-Install {
+    param([switch]$Force)
+    # Read by Set-FileIfNeeded and Set-ShortcutIfNeeded.
+    $script:forceInstall = [bool]$Force
+    $changed = [System.Collections.Generic.List[string]]::new()
+    if (-not (Test-Path $Script:DataDir)) { New-Item -Path $Script:DataDir -ItemType Directory -Force | Out-Null }
+
+    $same = (-not $Force) -and (Test-Path -LiteralPath $Script:InstalledScript) -and
+        ((Get-FileHash -LiteralPath $Script:InstalledScript -Algorithm SHA256).Hash -eq (Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash)
+    if (-not $same -and $PSCommandPath -ne $Script:InstalledScript) {
+        Copy-Item -LiteralPath $PSCommandPath -Destination $Script:InstalledScript -Force
+        Add-Change $changed 'program file'
+    }
+
+    # The browsers start the helper through this; the shortcuts start the
+    # window through the .vbs so no console window flashes up.
     $launcher = "@echo off`r`npowershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"%~dp0BookmarkSync.ps1`" -NativeHost`r`n"
-    Write-FileSafely -Path $Script:LauncherFile -Text $launcher
+    Set-FileIfNeeded -Path $Script:LauncherFile -Text $launcher -Change 'browser launcher' -Changed $changed
+    $launch = "Set shell = CreateObject(`"WScript.Shell`")`r`nfolder = CreateObject(`"Scripting.FileSystemObject`").GetParentFolderName(WScript.ScriptFullName)`r`nshell.Run `"powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"`"`" & folder & `"\BookmarkSync.ps1`"`"`", 0, False`r`n"
+    Set-FileIfNeeded -Path $Script:LaunchFile -Text $launch -Change 'window launcher' -Changed $changed
 
     $chromium = [ordered]@{
         name            = $Script:HostName
@@ -904,46 +972,74 @@ function Register-NativeHost {
         type               = 'stdio'
         allowed_extensions = @($Script:FirefoxExtensionId)
     }
-    Write-FileSafely -Path (Join-Path $Script:DataDir 'host-chromium.json') -Text ($chromium | ConvertTo-Json)
-    Write-FileSafely -Path (Join-Path $Script:DataDir 'host-firefox.json') -Text ($firefox | ConvertTo-Json)
+    Set-FileIfNeeded -Path (Join-Path $Script:DataDir 'host-chromium.json') -Text ($chromium | ConvertTo-Json) -Change 'browser registration' -Changed $changed
+    Set-FileIfNeeded -Path (Join-Path $Script:DataDir 'host-firefox.json') -Text ($firefox | ConvertTo-Json) -Change 'browser registration' -Changed $changed
 
     foreach ($entry in $Script:HostRegistryKeys) {
-        New-Item -Path $entry.Key -Value (Join-Path $Script:DataDir $entry.Manifest) -Force | Out-Null
+        $want = Join-Path $Script:DataDir $entry.Manifest
+        $current = $null
+        try { $current = (Get-Item -Path $entry.Key -ErrorAction Stop).GetValue('') } catch { $current = $null }
+        if ($Force -or $current -ne $want) {
+            New-Item -Path $entry.Key -Value $want -Force | Out-Null
+            Add-Change $changed 'browser registration'
+        }
     }
+
+    $iconStream = New-Object System.IO.MemoryStream
+    $Script:AppIcon.Save($iconStream)
+    $iconBytes = $iconStream.ToArray()
+    $iconSame = (-not $Force) -and (Test-Path -LiteralPath $Script:IconFile) -and
+        ([Convert]::ToBase64String([System.IO.File]::ReadAllBytes($Script:IconFile)) -eq [Convert]::ToBase64String($iconBytes))
+    if (-not $iconSame) {
+        [System.IO.File]::WriteAllBytes($Script:IconFile, $iconBytes)
+        Add-Change $changed 'icon'
+    }
+
+    foreach ($folder in (Get-ShortcutFolders)) { Set-ShortcutIfNeeded -Folder $folder -Changed $changed }
+
+    # Settings: create from the defaults if missing, otherwise add only
+    # settings new in this version. Never change the user's values. A file
+    # that will not read is left alone and reported when the window opens.
+    $configRead = Read-Config
+    if (-not (Test-Path -LiteralPath $Script:ConfigFile)) {
+        Save-Config $configRead.Config
+        Add-Change $changed 'settings file'
+    } elseif (-not $configRead.Problem) {
+        $saved = Get-Content -Path $Script:ConfigFile -Raw -Encoding UTF8 | ConvertFrom-Json
+        $missing = @($Script:DefaultConfig.Keys | Where-Object { $null -eq $saved.PSObject.Properties[$_] })
+        if ($missing.Count -gt 0) {
+            Save-Config $configRead.Config
+            Add-Change $changed "new settings: $($missing -join ', ')"
+        }
+    }
+
+    # The version stamp goes last, once everything else has worked.
+    New-Item -Path $Script:RegKey -Force | Out-Null
+    New-ItemProperty -Path $Script:RegKey -Name 'Version' -Value $Script:AppVersion -Force | Out-Null
+    if ($PSScriptRoot -and $PSScriptRoot -ne $Script:DataDir) {
+        New-ItemProperty -Path $Script:RegKey -Name 'SourceFolder' -Value $PSScriptRoot -Force | Out-Null
+    }
+
+    if ($changed.Count -gt 0) { Write-AppLog "Install $($Script:VersionTag): $($changed -join ', ')" }
+    return ,$changed
 }
 
-# Copies this script into the app folder, registers it with the browsers
-# and adds a Start menu shortcut. Settings, bookmarks and backups are kept.
-function Install-App {
-    if (-not (Test-Path $Script:DataDir)) { New-Item -Path $Script:DataDir -ItemType Directory -Force | Out-Null }
-    if ($PSCommandPath -ne $Script:InstalledScript) {
-        Copy-Item -Path $PSCommandPath -Destination $Script:InstalledScript -Force
-    }
-    Register-NativeHost
-
-    $stream = [System.IO.File]::Create($Script:IconFile)
-    try { $Script:AppIcon.Save($stream) } finally { $stream.Dispose() }
-
-    $shortcutPath = Join-Path ([Environment]::GetFolderPath('Programs')) "$($Script:AppTitle).lnk"
-    $shell = New-Object -ComObject WScript.Shell
-    $shortcut = $shell.CreateShortcut($shortcutPath)
-    $shortcut.TargetPath = 'powershell.exe'
-    $shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$($Script:InstalledScript)`""
-    $shortcut.IconLocation = $Script:IconFile
-    $shortcut.Description = $Script:AppTitle
-    $shortcut.Save()
-
-    Write-AppLog "Installed $($Script:VersionTag)"
-}
-
-# Undoes Install-App and sends the app folder (bookmarks state, backups,
+# Undoes Sync-Install and sends the app folder (bookmarks state, backups,
 # settings, log) to the Recycle Bin, so it can still be got back.
-function Uninstall-App {
+function Uninstall-BookmarkSync {
     foreach ($entry in $Script:HostRegistryKeys) {
         if (Test-Path $entry.Key) { Remove-Item -Path $entry.Key -Force }
     }
-    $shortcutPath = Join-Path ([Environment]::GetFolderPath('Programs')) "$($Script:AppTitle).lnk"
-    if (Test-Path $shortcutPath) { Remove-Item -Path $shortcutPath -Force }
+
+    $folders = [System.Collections.Generic.List[string]]::new()
+    $folders.Add([Environment]::GetFolderPath('Desktop'))
+    $folders.Add([Environment]::GetFolderPath('Programs'))
+    try { $folders.Add((Get-ItemProperty -Path $Script:RegKey -Name 'SourceFolder' -ErrorAction Stop).SourceFolder) } catch { $folders = $folders }
+    foreach ($folder in $folders) {
+        $file = Join-Path $folder "$($Script:AppTitle).lnk"
+        if (Test-Path -LiteralPath $file) { Remove-Item -LiteralPath $file -Force }
+    }
+    if (Test-Path $Script:RegKey) { Remove-Item -Path $Script:RegKey -Recurse -Force }
 
     Add-Type -AssemblyName Microsoft.VisualBasic
     if (Test-Path $Script:DataDir) {
@@ -1183,9 +1279,17 @@ The first time a browser syncs, everything it has is added to the master
 list and nothing is removed. After that, adds and deletes in any browser
 reach the others.
 
+Open this window from the Bookmark Sync shortcut on the Desktop, in the
+Start menu, or in the folder you first ran it from.
+
 The extension's toolbar button shows when it last synced. Sync now does it
-straight away. A red ! means it could not reach this app: run
-BookmarkSync.ps1 again to repair the install.
+straight away. A red ! means it could not reach this app: use
+Settings > Repair install.
+
+UPDATING
+Run a newer BookmarkSync.ps1 the same way as the first time. It changes
+only what differs and says what it changed. Your settings, bookmarks and
+backups are kept. Running an older copy changes nothing.
 
 BROWSERS
 The list shows each browser that has synced, how many bookmarks it had and
@@ -1214,8 +1318,10 @@ Browser pages such as chrome:// and about: are never synced or changed.
 
 SETTINGS
 Settings > Open settings file opens config.json. Restore defaults puts the
-settings back. Remove all app data takes Bookmark Sync off this computer
-and sends its folder, backups included, to the Recycle Bin.
+settings back. Repair install rewrites the helper, browser registration and
+shortcuts. Remove all app data takes Bookmark Sync off this computer
+(shortcuts included) and sends its folder, backups included, to the
+Recycle Bin.
 '@
 
 # Shows the help text in its own window.
@@ -1324,12 +1430,12 @@ function Show-SettingsWindow {
     $remove.Add_Click({
         $message = "This takes Bookmark Sync off this computer:`r`n`r`n" +
             "- the browsers stop being able to sync (remove the extension yourself)`r`n" +
-            "- the Start menu shortcut is removed`r`n" +
+            "- the Desktop, Start menu and folder shortcuts are removed`r`n" +
             "- the app folder, including all backups, goes to the Recycle Bin`r`n`r`n" +
             "Your bookmarks in each browser stay as they are. Carry on?"
         if (Confirm-Action $message 'Remove all app data') {
             try {
-                Uninstall-App
+                Uninstall-BookmarkSync
                 $script:settingsResult = 'removed'
                 $form.Close()
             } catch {
@@ -1338,7 +1444,18 @@ function Show-SettingsWindow {
         }
     })
     $form.Controls.Add($remove)
-    $form.Controls.Add((New-SmallPrint 'Restore defaults resets settings only. Remove all app data uninstalls.' 16 334 400))
+    $repair = New-StyledButton -Text 'Repair install' -X 332 -Y 296 -Width 92
+    $repair.Add_Click({
+        try {
+            $changes = Sync-Install -Force
+            Write-AppLog "Repaired: $($changes -join ', ')"
+            [void][System.Windows.Forms.MessageBox]::Show('Complete - the helper, browser registration and shortcuts were rewritten.', $Script:AppTitle)
+        } catch {
+            Show-Error "The repair did not finish. $($_.Exception.Message)"
+        }
+    })
+    $form.Controls.Add($repair)
+    $form.Controls.Add((New-SmallPrint 'Restore defaults resets settings only. Remove all app data uninstalls. Repair install fixes a broken install.' 16 334 410))
 
     $save = New-StyledButton -Text 'Save' -X 16 -Y 400 -Width 90 -Primary
     $save.Add_Click({
@@ -1417,6 +1534,7 @@ function Set-Status {
 
 # The main window: browsers, backups, Back up now, Settings, Close.
 function Show-MainWindow {
+    param([string]$StartupNote)
     $script:mainConfig = (Read-Config).Config
 
     $form = New-Object System.Windows.Forms.Form
@@ -1574,6 +1692,7 @@ function Show-MainWindow {
 
     Update-BrowserList
     Update-BackupList
+    if ($StartupNote) { Set-Status $StartupNote $Script:ColorCurrentFg }
     $configCheck = Read-Config
     if ($configCheck.Problem) {
         Set-Status 'The settings file has a problem, defaults are in use. Settings > Open settings file.' $Script:ColorWarningFg
@@ -1586,35 +1705,54 @@ function Show-MainWindow {
 # Region: Start
 # ============================================================================
 
-# Installs or upgrades when run from a new copy, then opens the window.
-# An older copy hands over to the newer installed one instead.
+# Decides at start-up whether to install, upgrade or just run.
+# Only a copy run from outside the app folder installs or upgrades: first
+# run installs and welcomes, a newer copy upgrades and says what changed,
+# the same or an older copy carries on with no changes. -Install repairs.
 function Start-App {
     Initialize-Ui
+    $note = $null
+    $firstRun = $false
     try {
         Copy-LegacyData
         if ($PSCommandPath -ne $Script:InstalledScript) {
             $installed = Get-InstalledVersion
-            $current = [version]$Script:AppVersion
-            if ($null -eq $installed -or $current -gt $installed) {
-                Install-App
-            } elseif ($current -lt $installed) {
-                Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$($Script:InstalledScript)`""
-                return
-            } else {
-                Register-NativeHost
+            # A stamp without the program file means the folder was removed by hand.
+            if ($null -ne $installed -and -not (Test-Path -LiteralPath $Script:InstalledScript)) { $installed = $null }
+            if ($Install) {
+                $null = Sync-Install -Force
+                $note = "Bookmark Sync $($Script:AppVersion) reinstalled."
+            } elseif ($null -eq $installed) {
+                $null = Sync-Install
+                $firstRun = $true
+            } elseif ([version]$Script:AppVersion -gt $installed) {
+                $changes = Sync-Install
+                $note = "Bookmark Sync updated to $($Script:AppVersion) ($($changes -join ', '))."
             }
         }
     } catch {
         Show-Error "Bookmark Sync could not be installed. $($_.Exception.Message)"
         return
     }
-    Show-MainWindow
+
+    if ($firstRun) {
+        $message = "Bookmark Sync is installed. Open it any time from the Bookmark Sync shortcut on your Desktop or in the Start menu.`r`n`r`n" +
+            "Next, add the Bookmark Sync extension to each browser. Settings > Help explains how."
+        [void][System.Windows.Forms.MessageBox]::Show($message, $Script:AppTitle,
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Information)
+    }
+    Show-MainWindow -StartupNote $note
 }
 
 # Dot-sourcing (the tests) loads the functions without starting anything.
 if ($MyInvocation.InvocationName -ne '.') {
     if ($NativeHost) {
         Invoke-NativeHost
+    } elseif ($Uninstall) {
+        Initialize-Ui
+        Uninstall-BookmarkSync
+        [void][System.Windows.Forms.MessageBox]::Show('Bookmark Sync was removed. Your bookmarks in each browser were not touched, and its folder is in the Recycle Bin.', $Script:AppTitle)
     } else {
         Start-App
     }

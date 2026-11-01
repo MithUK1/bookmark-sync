@@ -28,12 +28,14 @@ Firefox: News                  Firefox: Recipes, News, Weather
 
 ## Install
 
-1. Run `BookmarkSync.ps1` (right-click, Run with PowerShell). It installs itself for your user, no admin rights, and opens the Bookmark Sync window. Running a newer copy later upgrades it and keeps your settings, bookmarks and backups.
+1. Run `BookmarkSync.ps1` (right-click, Run with PowerShell). It installs itself for your user, no admin rights, adds a **Bookmark Sync** shortcut to the Desktop, the Start menu and the folder you ran it from, and opens the Bookmark Sync window.
 2. Build the extension: run `build.ps1`. It writes `dist\chromium` and `dist\firefox`.
 3. Add the extension to each browser:
    - **Chrome:** `chrome://extensions`, turn on Developer mode, Load unpacked, pick `dist\chromium`.
    - **Edge:** `edge://extensions`, turn on Developer mode, Load unpacked, pick `dist\chromium`.
    - **Firefox:** sign `dist\bookmark-sync-firefox-<version>.zip` as an unlisted add-on on addons.mozilla.org and install the signed `.xpi`. For a quick try, `about:debugging`, This Firefox, Load Temporary Add-on, pick the zip (removed when Firefox restarts).
+
+**Updating:** run a newer `BookmarkSync.ps1` the same way. It compares versions, changes only what differs (program file, launchers, browser registration, icon, shortcuts, new settings) and says what it changed. Settings, bookmarks and backups are kept, and an older copy changes nothing. **Settings > Repair install** rewrites everything if the install breaks.
 
 Each browser syncs a few seconds after a bookmark change, when it starts, and every 5 minutes. The toolbar button shows the last sync, has **Sync now**, and opens the Bookmark Sync window.
 
@@ -72,4 +74,4 @@ Bookmarks never leave this computer. The extension talks only to the Bookmark Sy
 
 - New bookmarks are added at the end of their folder, so exact order is not synced.
 - The Firefox bookmarks menu and other bookmarks count as one area.
-- Removing Bookmark Sync: **Settings > Remove all app data**. It unregisters the helper, removes the Start menu shortcut and sends the app folder to the Recycle Bin. Remove the extension from each browser yourself.
+- Removing Bookmark Sync: **Settings > Remove all app data**. It unregisters the helper, removes the shortcuts and sends the app folder to the Recycle Bin. Remove the extension from each browser yourself.
