@@ -124,7 +124,15 @@ $state.master.bookmarks.Clear()
 Restore-Backup -State $state -Name $name -Config $config
 Assert-Equal 'https://a.test https://b.test' (Get-MasterUrls $state) 'restore brings the master back'
 Assert-Equal 'chrome,edge' (($state.pending_overwrite | Sort-Object) -join ',') 'restore marks every browser to change'
-Assert-Equal 'Backed up by you' (@(Get-BackupList | Where-Object { $_.Name -eq $name })[0].Reason) 'backup list reads the reason'
+$listed = @(Get-BackupList | Where-Object { $_.Name -eq $name })[0]
+Assert-Equal 'Manual' $listed.Type 'backup list reads the type'
+Assert-Equal 'All browsers' $listed.Browser 'manual backup covers all browsers'
+$autoListed = @(Get-BackupList | Where-Object { $_.Type -eq 'Automatic' })
+Assert-Equal 'Chrome Edge' (($autoListed | ForEach-Object { $_.Browser } | Sort-Object) -join ' ') 'automatic backups name their browser'
+$old = Join-Path $Script:BackupDir 'bookmarks-20250101-120000-auto.json'
+Set-Content -Path $old -Value '{}'
+Assert-Equal 'All browsers' (@(Get-BackupList | Where-Object { $_.Name -eq 'bookmarks-20250101-120000-auto' })[0].Browser) 'older backup names still read'
+Remove-Item -Path $old
 
 # ---- Escaping in the html backup ----
 $escaped = ConvertTo-BookmarkHtml @([ordered]@{ url = 'https://x.test/?a=1&b=2'; title = 'Tom & Jerry <3'; path = [string[]]@('other'); index = 0 })

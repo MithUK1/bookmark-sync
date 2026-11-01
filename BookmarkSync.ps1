@@ -40,7 +40,7 @@ param(
 # ============================================================================
 
 $Script:AppTitle   = 'Bookmark Sync'
-$Script:AppVersion = '0.1.1'
+$Script:AppVersion = '0.1.2'
 $Script:VersionTag = "v$($Script:AppVersion) - MUK1"
 
 # The name each browser uses to find this helper, and the extensions allowed
@@ -507,7 +507,7 @@ function Invoke-BrowserSync {
         [void]$State.pending_overwrite.Remove($Browser)
         $note = 'changed to match the master list'
     } elseif ($State.mirror_from -eq $Browser) {
-        New-Backup -State $State -Reason 'before-source' -IncludeSeen -Config $Config | Out-Null
+        New-Backup -State $State -Reason 'before-source' -Browser $Browser -IncludeSeen -Config $Config | Out-Null
         $master = [ordered]@{}
         foreach ($key in $current.Keys) { $master[$key] = $current[$key] }
         $masterFolders = @{}
@@ -549,7 +549,7 @@ function Invoke-BrowserSync {
     $changed = -not (Test-SameKeys $master.Keys $oldKeys) -or -not (Test-SameKeys $master.Keys $current.Keys)
     $stale = (Get-UnixTime) - $State.last_auto_backup -gt $Script:AutoBackupGap
     if ($changed -and ($firstSync -or $stale)) {
-        New-Backup -State $State -Reason 'auto' -IncludeSeen -Config $Config | Out-Null
+        New-Backup -State $State -Reason 'auto' -Browser $Browser -IncludeSeen -Config $Config | Out-Null
         $State.last_auto_backup = Get-UnixTime
     }
 
@@ -646,12 +646,14 @@ function Add-BookmarkHtmlNode {
 }
 
 # Saves the master list (and, with -IncludeSeen, what each browser last
-# had) as a .json and .html pair. Old automatic backups beyond the number
-# kept in Settings are removed; manual ones are always kept.
+# had) as a .json and .html pair. -Browser names the browser whose sync
+# caused it, or 'all' when it covers every browser. Old automatic backups
+# beyond the number kept in Settings are removed; manual ones are kept.
 function New-Backup {
     param(
         [Parameter(Mandatory)]$State,
         [Parameter(Mandatory)][string]$Reason,
+        [string]$Browser = 'all',
         [switch]$IncludeSeen,
         $Config
     )
@@ -659,11 +661,11 @@ function New-Backup {
 
     # Milliseconds keep two backups in the same second apart.
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmssfff'
-    $name = "bookmarks-$stamp-$Reason"
+    $name = "bookmarks-$stamp-$Browser-$Reason"
     $snapshots = @{}
     foreach ($browser in $State.browsers.Keys) { $snapshots[$browser] = $State.browsers[$browser].snapshot }
 
-    $payload = [ordered]@{ version = 1; created = $stamp; reason = $Reason; master = $State.master; browsers = $snapshots }
+    $payload = [ordered]@{ version = 1; created = $stamp; reason = $Reason; browser = $Browser; master = $State.master; browsers = $snapshots }
     Write-FileSafely -Path (Join-Path $Script:BackupDir "$name.json") -Text (ConvertTo-Json -InputObject $payload -Depth 12 -Compress)
 
     # The .html copy also holds anything a browser had that the master does
@@ -691,22 +693,27 @@ function New-Backup {
     return $name
 }
 
-# Lists backups newest first, with a readable date and reason.
+# Lists backups newest first, with a readable date, browser and type.
+# Names from before the browser was recorded still read, as all browsers.
 function Get-BackupList {
     if (-not (Test-Path $Script:BackupDir)) { return @() }
     $result = [System.Collections.Generic.List[object]]::new()
     foreach ($file in (Get-ChildItem -Path $Script:BackupDir -Filter 'bookmarks-*.json' | Sort-Object Name -Descending)) {
-        $match = [regex]::Match($file.BaseName, '^bookmarks-(\d{8})-(\d{6})\d{0,3}-(.+)$')
+        $match = [regex]::Match($file.BaseName, '^bookmarks-(\d{8})-(\d{6})\d{0,3}-(?:(chrome|edge|firefox|all)-)?(.+)$')
         if (-not $match.Success) { continue }
         $when = [datetime]::ParseExact($match.Groups[1].Value + $match.Groups[2].Value, 'yyyyMMddHHmmss', $null)
-        $reason = switch ($match.Groups[3].Value) {
-            'auto'           { 'Automatic' }
-            'manual'         { 'Backed up by you' }
-            'before-restore' { 'Before a restore' }
-            'before-source'  { 'Before a browser was used as the source' }
-            default          { $match.Groups[3].Value }
+        $browser = 'All browsers'
+        if ($match.Groups[3].Success -and $Script:BrowserNames.ContainsKey($match.Groups[3].Value)) {
+            $browser = $Script:BrowserNames[$match.Groups[3].Value]
         }
-        $result.Add([pscustomobject]@{ Name = $file.BaseName; When = $when; Reason = $reason })
+        $type = switch ($match.Groups[4].Value) {
+            'auto'           { 'Automatic' }
+            'manual'         { 'Manual' }
+            'before-restore' { 'Before restore' }
+            'before-source'  { 'Before use as source' }
+            default          { $match.Groups[4].Value }
+        }
+        $result.Add([pscustomobject]@{ Name = $file.BaseName; When = $when; Browser = $browser; Type = $type })
     }
     return $result
 }
@@ -1520,7 +1527,8 @@ function Update-BackupList {
     foreach ($backup in (Get-BackupList)) {
         $item = New-Object System.Windows.Forms.ListViewItem($backup.When.ToString('d MMM yyyy HH:mm'))
         $item.Tag = $backup.Name
-        [void]$item.SubItems.Add($backup.Reason)
+        [void]$item.SubItems.Add($backup.Browser)
+        [void]$item.SubItems.Add($backup.Type)
         [void]$script:backupList.Items.Add($item)
     }
 }
@@ -1595,7 +1603,7 @@ function Show-MainWindow {
 
     $form.Controls.Add((New-Heading 'Backups' 16 206))
     $script:backupList = New-CardList -X 16 -Y 230 -Width 528 -Height 200 -Columns @(
-        @('Date', 160), @('Reason', 346))
+        @('Date', 140), @('Browser', 120), @('Type', 246))
     $form.Controls.Add($script:backupList)
 
     $restore = New-StyledButton -Text 'Restore' -X 16 -Y 438 -Width 90 -Warning
