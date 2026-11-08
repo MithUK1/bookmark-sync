@@ -31,7 +31,7 @@ document.getElementById('open').addEventListener('click', async () => {
     window.close();
   } catch {
     const box = document.getElementById('status');
-    box.textContent = 'Bookmark Sync is not installed on this computer. Run BookmarkSync.ps1 to install it.';
+    box.textContent = 'Bookmark Sync is not installed on this computer. Run BookmarkSync.exe once to install it.';
     box.className = 'status bad';
   }
 });

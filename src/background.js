@@ -2,8 +2,9 @@
 //
 // Sends this browser's bookmarks to the Bookmark Sync helper on this
 // computer, gets the master list back and changes this browser's bookmarks
-// to match. The helper is started by the browser for each request and
-// exits straight after, so nothing runs in between.
+// to match. The browser keeps one connection open to the helper, which
+// watches for changes made by the other browsers and tells this one the
+// moment it needs to sync.
 
 const api = globalThis.browser ?? globalThis.chrome;
 const HOST = 'com.muk1.bookmarksync';
@@ -11,7 +12,10 @@ const SEP = '\x1f';
 const KEY_SEP = '\x1e';
 const ALLOWED_SCHEMES = ['http:', 'https:', 'ftp:', 'file:', 'javascript:'];
 const TRACKING = /^(utm_|fbclid$|gclid$|mc_eid$)/;
-const DEFAULT_POLL_MINUTES = 1;
+// A slow safety check, and the way a lost connection is retried.
+const SAFETY_MINUTES = 10;
+const RECONNECT_MS = 30 * 1000;
+const REQUEST_TIMEOUT_MS = 60 * 1000;
 const CHANGE_DELAY_MS = 4000;
 // Most moves one sync makes, so a huge reshuffle cannot freeze the browser;
 // the rest is done by the next sync a few seconds later.
@@ -59,7 +63,7 @@ function syncable(url) {
   }
 }
 
-// Same rules as Get-NormalUrl in BookmarkSync.ps1, change them together.
+// Same rules as Rules.NormalUrl in the app, change them together.
 // Ignores http/https, host case, www., default ports, trailing slashes,
 // tracking parameters and the #fragment.
 function normUrl(url) {
@@ -80,8 +84,8 @@ function normUrl(url) {
 }
 
 // An item's name inside its folder's order list. Bookmarks go by address,
-// folders by name. Same rules as Get-BookmarkToken and Get-FolderToken in
-// BookmarkSync.ps1.
+// folders by name. Same rules as Rules.BookmarkToken and Rules.FolderToken in
+// the app.
 function bookmarkToken(url) {
   return `b|${normUrl(url)}`;
 }
@@ -144,12 +148,73 @@ function payload(snap) {
   };
 }
 
+// The open connection to the helper and the requests waiting for a reply.
+let port = null;
+let nextId = 1;
+const waiting = new Map();
+let reconnectTimer = null;
+
+// Opens the connection if it is not open and says hello, so the helper
+// knows which browser this is and starts watching for changes.
+function connect() {
+  if (port) return port;
+  clearTimeout(reconnectTimer);
+  const opened = api.runtime.connectNative(HOST);
+  port = opened;
+  opened.onMessage.addListener((message) => {
+    if (message?.type === 'changed') {
+      sync();
+      return;
+    }
+    const entry = waiting.get(message?.id);
+    if (!entry) return;
+    waiting.delete(message.id);
+    clearTimeout(entry.timeout);
+    if (!message.ok) entry.reject(new Error(message.error));
+    else entry.resolve(message);
+  });
+  opened.onDisconnect.addListener(() => {
+    const reason = api.runtime.lastError?.message ?? 'The connection to Bookmark Sync closed';
+    if (port === opened) port = null;
+    for (const [id, entry] of waiting) {
+      clearTimeout(entry.timeout);
+      entry.reject(new Error(reason));
+      waiting.delete(id);
+    }
+    // Try again shortly; if the helper is not installed this just keeps failing quietly.
+    reconnectTimer = setTimeout(() => {
+      connect();
+      sync(true);
+    }, RECONNECT_MS);
+  });
+  opened.postMessage({ type: 'hello', browser: BROWSER, id: 0 });
+  return opened;
+}
+
 // Sends one request to the helper and returns its reply.
-async function callHost(message) {
-  const reply = await api.runtime.sendNativeMessage(HOST, message);
-  if (!reply) throw new Error('No reply from Bookmark Sync');
-  if (!reply.ok) throw new Error(reply.error);
-  return reply;
+function callHost(message) {
+  return new Promise((resolve, reject) => {
+    let connection;
+    try {
+      connection = connect();
+    } catch (err) {
+      reject(err);
+      return;
+    }
+    const id = nextId++;
+    const timeout = setTimeout(() => {
+      waiting.delete(id);
+      reject(new Error('Bookmark Sync did not answer'));
+    }, REQUEST_TIMEOUT_MS);
+    waiting.set(id, { resolve, reject, timeout });
+    try {
+      connection.postMessage({ ...message, id });
+    } catch (err) {
+      waiting.delete(id);
+      clearTimeout(timeout);
+      reject(err);
+    }
+  });
 }
 
 // Turns base64 pieces back into one block of text.
@@ -364,7 +429,7 @@ async function removeEmptyFolders(wantedFolders, stats) {
 function describeError(err) {
   const text = String(err?.message ?? err);
   if (/not found|no such native application|not installed/i.test(text)) {
-    return 'Bookmark Sync is not installed on this computer. Run BookmarkSync.ps1 to install it.';
+    return 'Bookmark Sync is not installed on this computer. Run BookmarkSync.exe once to install it.';
   }
   return `Bookmark Sync could not sync: ${text}`;
 }
@@ -400,7 +465,6 @@ async function sync(force = false) {
       full = false;
       if (!needFull) {
         const quick = await callHost({ type: 'check', browser: BROWSER });
-        await setPollMinutes(quick.pollMinutes);
         if (quick.current) {
           await setStatus(true, 'Up to date');
           continue;
@@ -411,7 +475,6 @@ async function sync(force = false) {
       dirtyStored = false;
       await api.storage.local.set({ dirty: false });
       const first = await callHost({ type: 'sync', ...payload(await snapshot()) });
-      await setPollMinutes(first.pollMinutes);
       if (first.unchanged) {
         stuckCount = 0;
         await setStatus(true, 'Up to date');
@@ -471,22 +534,17 @@ for (const event of ['onCreated', 'onRemoved', 'onChanged', 'onMoved', 'onImport
   api.bookmarks[event]?.addListener(onBookmarkChange);
 }
 
-// Sets how often this browser checks, from the helper's setting. The alarm
-// is only recreated when the period changes, as recreating restarts its clock.
-async function setPollMinutes(minutes) {
-  const wanted = Number.isFinite(minutes) && minutes >= 1 ? minutes : DEFAULT_POLL_MINUTES;
-  const existing = await api.alarms.get('poll');
-  if (!existing || existing.periodInMinutes !== wanted) {
-    await api.alarms.create('poll', { periodInMinutes: wanted });
-    await api.storage.local.set({ pollMinutes: wanted });
-  }
-}
-
-// Use the last known period when the background script starts.
-api.storage.local.get('pollMinutes').then((stored) => setPollMinutes(stored.pollMinutes));
+// A slow check in case a push was missed, and a way to wake the connection.
+api.alarms.create('safety', { periodInMinutes: SAFETY_MINUTES });
 api.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === 'poll') sync();
+  if (alarm.name === 'safety') sync();
 });
+// Open the connection as soon as the background script starts.
+try {
+  connect();
+} catch (err) {
+  console.warn('Bookmark Sync helper not reachable', err);
+}
 api.runtime.onStartup.addListener(() => sync(true));
 api.runtime.onInstalled.addListener(() => sync(true));
 api.runtime.onMessage.addListener((message) => {
