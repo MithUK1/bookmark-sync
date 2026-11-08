@@ -281,13 +281,20 @@ namespace BookmarkSync.Tests
             catch (InvalidOperationException) { passes++; }
 
             // ---- Settings ----
-            File.WriteAllText(Env.ConfigFile, "{ \"RemoveDuplicates\": false, \"AutoBackupsToKeep\": 2");
+            File.Delete(Env.ConfigFile);
+            var hello = Host.Handle(new Dictionary<string, object> { { "type", "hello" }, { "browser", "chrome" } });
+            Equal(true, (bool)hello["askDuplicates"], "browsers ask about duplicates by default");
+            new Config { RemoveDuplicates = true }.Save();
+            hello = Host.Handle(new Dictionary<string, object> { { "type", "hello" }, { "browser", "chrome" } });
+            Equal(false, (bool)hello["askDuplicates"], "no question when duplicates are deleted anyway");
+            File.Delete(Env.ConfigFile);
+            File.WriteAllText(Env.ConfigFile, "{ \"RemoveDuplicates\": true, \"AutoBackupsToKeep\": 2");
             var broken = Config.Load();
             Equal(true, broken.Problem != null, "broken settings file is reported");
-            Equal(true, broken.RemoveDuplicates, "broken settings file falls back to defaults");
-            File.WriteAllText(Env.ConfigFile, "{ \"RemoveDuplicates\": false, \"AutoBackupsToKeep\": 2, \"MasterBrowser\": \"Chrome\" }");
+            Equal(false, broken.RemoveDuplicates, "broken settings file falls back to defaults");
+            File.WriteAllText(Env.ConfigFile, "{ \"RemoveDuplicates\": true, \"AutoBackupsToKeep\": 2, \"MasterBrowser\": \"Chrome\" }");
             var read = Config.Load();
-            Equal(false, read.RemoveDuplicates, "saved setting is read");
+            Equal(true, read.RemoveDuplicates, "saved setting is read");
             Equal(5, read.AutoBackupsToKeep, "backups kept never drops below 5");
             Equal("chrome", read.MasterBrowser, "master browser is read, any case");
             read.MasterBrowser = "bogus";

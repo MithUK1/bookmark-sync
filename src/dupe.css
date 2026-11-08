@@ -1,0 +1,88 @@
+:root {
+  --bg: #e7eaef;
+  --card: #ffffff;
+  --text: #1f2328;
+  --muted: #6b7280;
+  --border: #bcc2ca;
+  --accent: #2b6cdf;
+  --accent-dark: #1b4fad;
+  --ok: #0f6e4b;
+  --error: #b40000;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1f2328;
+    --card: #2a2f36;
+    --text: #e7eaef;
+    --muted: #9aa1ab;
+    --border: #444b55;
+    --accent: #4c86ea;
+    --accent-dark: #2b6cdf;
+    --ok: #4cc38a;
+    --error: #ff6b6b;
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px "Segoe UI", system-ui, sans-serif;
+}
+
+.accent {
+  height: 4px;
+  background: var(--accent);
+}
+
+main {
+  padding: 16px;
+}
+
+h1 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+
+p {
+  margin: 4px 0;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+ul {
+  margin: 8px 0 14px;
+  padding: 8px 12px 8px 28px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  max-height: 120px;
+  overflow: auto;
+}
+
+li {
+  margin: 4px 0;
+  overflow-wrap: anywhere;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+}
+
+button {
+  padding: 7px 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent-dark);
+  color: #fff;
+}

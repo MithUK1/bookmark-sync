@@ -72,6 +72,14 @@ namespace BookmarkSync
             };
             Controls.Add(settings);
 
+            var setup = Theme.Button("Set up browsers", 252, 512, 140);
+            setup.Click += (s, e) =>
+            {
+                using (var form = new SetupForm()) form.ShowDialog(this);
+                RefreshAll();
+            };
+            Controls.Add(setup);
+
             var close = Theme.Button("Close", 434, 512);
             close.Click += (s, e) => Close();
             Controls.Add(close);

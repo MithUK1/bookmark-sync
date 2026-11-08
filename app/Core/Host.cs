@@ -77,6 +77,14 @@ namespace BookmarkSync
         /// reply with the master list in pieces, or unchanged), part (a further piece), ack (the
         /// browser applied the list, record its bookmarks) and open (show the window).
         /// </summary>
+        /// <summary>Tells the extension whether to ask before a new duplicate bookmark stays.</summary>
+        private static Dictionary<string, object> WithAsk(Dictionary<string, object> reply)
+        {
+            Config config = Config.Load();
+            reply["askDuplicates"] = config.AskAboutDuplicates && !config.RemoveDuplicates;
+            return reply;
+        }
+
         public static Dictionary<string, object> Handle(Dictionary<string, object> request)
         {
             string type = Json.Str(Json.Get(request, "type"));
@@ -90,11 +98,11 @@ namespace BookmarkSync
             string browser = Json.Str(Json.Get(request, "browser"));
             if (!Env.IsBrowser(browser)) throw new InvalidOperationException("Unknown browser '" + browser + "'.");
 
-            if (type == "hello") return Reply();
+            if (type == "hello") return WithAsk(Reply());
 
             if (type == "check")
             {
-                return Reply(new Dictionary<string, object> { { "current", Status.Load().IsCurrent(browser) } });
+                return WithAsk(Reply(new Dictionary<string, object> { { "current", Status.Load().IsCurrent(browser) } }));
             }
 
             if (type == "part")

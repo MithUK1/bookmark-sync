@@ -47,6 +47,11 @@ let dirtyStored = false;
 let lastSignature = '';
 let stuckCount = 0;
 let pausedUntil = 0;
+// Whether to ask before a new duplicate stays (set by the helper), and the
+// questions waiting for an answer: window id -> bookmark id.
+let askDuplicates = false;
+let importing = false;
+const pendingDupes = new Map();
 
 // Works out which browser this is, so the helper can tell them apart.
 function detectBrowser() {
@@ -162,6 +167,7 @@ function connect() {
   const opened = api.runtime.connectNative(HOST);
   port = opened;
   opened.onMessage.addListener((message) => {
+    if (typeof message?.askDuplicates === 'boolean') askDuplicates = message.askDuplicates;
     if (message?.type === 'changed') {
       sync();
       return;
@@ -454,6 +460,7 @@ async function sync(force = false) {
     again = true;
     return;
   }
+  if (pendingDupes.size > 0) return;
   if (!force && Date.now() < pausedUntil) return;
   running = true;
   try {
@@ -530,6 +537,54 @@ function onBookmarkChange() {
   timer = setTimeout(sync, CHANGE_DELAY_MS);
 }
 
+// Where an existing bookmark sits, in words.
+function placeName(path) {
+  const names = { toolbar: 'Bookmarks bar', other: 'Other bookmarks' };
+  return path.map((part, i) => (i === 0 ? names[part] ?? part : part)).join(' > ');
+}
+
+// A new bookmark whose address already exists somewhere: show where, and
+// let the person keep or remove it. Syncing waits for the answer.
+async function checkDuplicate(id, node) {
+  if (applying || importing || !askDuplicates || !node.url || !syncable(node.url)) return;
+  const wanted = normUrl(node.url);
+  const snap = await snapshot();
+  const existing = snap.bookmarks.filter((b) => b.id !== id && normUrl(b.url) === wanted);
+  if (existing.length === 0) return;
+  const details = {
+    id,
+    title: node.title ?? '',
+    place: placeName(snap.bookmarks.find((b) => b.id === id)?.path ?? ['other']),
+    existing: existing.slice(0, 5).map((b) => ({ title: b.title, place: placeName(b.path) })),
+    more: Math.max(0, existing.length - 5),
+  };
+  const url = `${api.runtime.getURL('dupe.html')}?d=${encodeURIComponent(JSON.stringify(details))}`;
+  const created = await api.windows.create({ url, type: 'popup', width: 460, height: 340 });
+  pendingDupes.set(created.id, id);
+}
+
+// The question was answered (or closed, which keeps the bookmark).
+async function finishDuplicate(windowId, keep) {
+  const id = pendingDupes.get(windowId);
+  if (id === undefined) return;
+  pendingDupes.delete(windowId);
+  if (!keep) {
+    try {
+      await api.bookmarks.remove(id);
+    } catch (err) {
+      console.warn('Could not remove the duplicate', err);
+    }
+  }
+  if (pendingDupes.size === 0) sync();
+}
+
+api.bookmarks.onCreated.addListener((id, node) => {
+  checkDuplicate(id, node).catch((err) => console.warn('Duplicate check failed', err));
+});
+api.bookmarks.onImportBegan?.addListener(() => { importing = true; });
+api.bookmarks.onImportEnded?.addListener(() => { importing = false; });
+api.windows.onRemoved.addListener((windowId) => finishDuplicate(windowId, true));
+
 for (const event of ['onCreated', 'onRemoved', 'onChanged', 'onMoved', 'onImportEnded']) {
   api.bookmarks[event]?.addListener(onBookmarkChange);
 }
@@ -547,6 +602,7 @@ try {
 }
 api.runtime.onStartup.addListener(() => sync(true));
 api.runtime.onInstalled.addListener(() => sync(true));
-api.runtime.onMessage.addListener((message) => {
+api.runtime.onMessage.addListener((message, sender) => {
   if (message === 'sync-now') sync(true);
+  if (message?.type === 'dupe-answer' && sender?.tab?.windowId !== undefined) finishDuplicate(sender.tab.windowId, message.keep);
 });

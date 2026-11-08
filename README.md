@@ -15,7 +15,7 @@ Firefox: News                  Firefox: Recipes, News, Weather
 
 - Keeps one master list of bookmarks on this computer and brings every browser in line with it.
 - First sync of a browser adds everything it has and removes nothing. After that, adds and deletes in any browser reach the others.
-- Removes duplicates (optional). The same address is kept once, preferring the bookmarks bar. `www.`, a trailing slash and tracking codes do not make two addresses different.
+- Duplicates are kept by default and synced. When you add a bookmark that already exists, a small window shows where the other one is (folder and title) and lets you keep both or remove the new one (turn this off with `AskAboutDuplicates`). Optionally **Delete duplicate bookmarks** keeps one copy of each address, preferring the bookmarks bar. `www.`, a trailing slash and tracking codes do not make two addresses different.
 - Backs up each browser separately, labelled by kind: before a change, daily, weekly, monthly, yearly and manual. It keeps 7 daily, 4 weekly, 12 monthly and 5 yearly backups per browser, plus the most recent before-a-change ones. Dailies are taken just after midnight, or at the next start if the computer was off. Each backup is a `.html` file (imports into any browser) and a `.json` file (restore it from the window).
 - Keeps the same folders in the same order in every browser, so the bookmarks bars and folders look alike. If you reorder a folder in one browser, that order is used.
 - **View master list** shows the one list every browser is kept to match.
@@ -33,10 +33,9 @@ Firefox: News                  Firefox: Recipes, News, Weather
 
 1. Build the program and extension: run `build.ps1` (needs the .NET SDK for the program). It writes `dist\BookmarkSync.exe`, `dist\chromium` and `dist\firefox`.
 2. Run `BookmarkSync.exe`. It installs itself for your user, no admin rights, registers the helper with each browser, adds a **Bookmark Sync** shortcut to the Desktop, the Start menu and the folder you ran it from (the Desktop and Start menu open the installed app, the folder one opens that copy so a newer download upgrades when you use it), starts with Windows, and opens the window.
-3. Add the extension to each browser:
-   - **Chrome:** `chrome://extensions`, turn on Developer mode, Load unpacked, pick `dist\chromium`.
-   - **Edge:** `edge://extensions`, turn on Developer mode, Load unpacked, pick `dist\chromium`.
-   - **Firefox:** sign `dist\bookmark-sync-firefox-<version>.zip` as an unlisted add-on on addons.mozilla.org and install the signed `.xpi`. For a quick try, `about:debugging`, This Firefox, Load Temporary Add-on, pick the zip (removed when Firefox restarts).
+3. Click **Set up browsers** in the window. It keeps the extension files up to date in its own folder, opens each browser's extensions page and copies the folder path:
+   - **Chrome and Edge:** turn on Developer mode, Load unpacked, paste the path. Browsers do not let a program add an extension from outside their store, so this one click is yours. After an update, press Reload on the extension.
+   - **Firefox:** sign the Firefox build as an unlisted add-on on addons.mozilla.org (free, no store listing), put the signed `.xpi` in the Bookmark Sync folder and press the Firefox button. Without a signed file, Firefox only allows a temporary add-on (about:debugging, Load Temporary Add-on, pick `manifest.json` in the copied folder), removed when Firefox restarts.
 
 **Updating:** run a newer `BookmarkSync.exe` the same way. It compares versions, changes only what differs (program file, browser registration, shortcuts, new settings) and says what it changed. Settings, bookmarks and backups are kept, and an older copy changes nothing. **Settings > Repair install** rewrites everything if the install breaks.
 
@@ -48,7 +47,8 @@ Settings are in the window under **Settings**, and in `%LOCALAPPDATA%\BookmarkSy
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| `RemoveDuplicates` | `true` | Keep one copy of each address, preferring the bookmarks bar. |
+| `RemoveDuplicates` | `false` | Delete duplicates: keep one copy of each address, preferring the bookmarks bar. |
+| `AskAboutDuplicates` | `true` | Ask before a new duplicate bookmark stays (only when duplicates are not deleted). |
 | `AutoBackupsToKeep` | `40` | How many before-a-change backups to keep per browser (5 to 500). Backups you make are always kept. |
 | `DailiesToKeep` | `7` | Daily backups to keep per browser. |
 | `WeekliesToKeep` | `4` | Weekly backups to keep per browser. |

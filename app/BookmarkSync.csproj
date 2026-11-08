@@ -7,7 +7,7 @@
     <RootNamespace>BookmarkSync</RootNamespace>
     <AssemblyName>BookmarkSync</AssemblyName>
     <ApplicationIcon>BookmarkSync.ico</ApplicationIcon>
-    <Version>0.4.0</Version>
+    <Version>0.5.0</Version>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <Deterministic>true</Deterministic>
@@ -15,6 +15,8 @@
   <ItemGroup>
     <Compile Include="Core\*.cs" />
     <Compile Include="App\*.cs" />
+    <EmbeddedResource Include="..\src\**\*" LogicalName="ext/%(RecursiveDir)%(Filename)%(Extension)" />
+    <EmbeddedResource Include="..\manifests\*.json" LogicalName="ext-manifest/%(Filename)%(Extension)" />
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Drawing" />
     <Reference Include="Microsoft.CSharp" />

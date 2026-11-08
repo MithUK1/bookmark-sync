@@ -25,6 +25,48 @@ namespace BookmarkSync
             new[] { @"Software\Mozilla\NativeMessagingHosts\" + Env.HostName, "host-firefox.json" }
         };
 
+        /// <summary>Where the extension for a browser is unpacked: "chromium" (Chrome and Edge) or "firefox".</summary>
+        public static string ExtensionDir(string flavour)
+        {
+            return Path.Combine(Env.DataDir, "extension", flavour);
+        }
+
+        /// <summary>
+        /// Unpacks the extension files built into the program, one folder for Chrome and Edge and one
+        /// for Firefox, each with its own manifest. Only files that differ are rewritten.
+        /// </summary>
+        public static void WriteExtensions(List<string> changes)
+        {
+            Assembly assembly = Assembly.GetExecutingAssembly();
+            foreach (string name in assembly.GetManifestResourceNames())
+            {
+                if (!name.StartsWith("ext/", StringComparison.Ordinal)) continue;
+                string relative = name.Substring(4).Replace('\\', Path.DirectorySeparatorChar);
+                foreach (string flavour in new[] { "chromium", "firefox" })
+                {
+                    string target = Path.Combine(ExtensionDir(flavour), relative);
+                    WriteIfDifferent(assembly, name, target, changes);
+                }
+            }
+            WriteIfDifferent(assembly, "ext-manifest/chrome.json", Path.Combine(ExtensionDir("chromium"), "manifest.json"), changes);
+            WriteIfDifferent(assembly, "ext-manifest/firefox.json", Path.Combine(ExtensionDir("firefox"), "manifest.json"), changes);
+        }
+
+        private static void WriteIfDifferent(Assembly assembly, string resource, string target, List<string> changes)
+        {
+            byte[] bytes;
+            using (Stream stream = assembly.GetManifestResourceStream(resource))
+            using (var memory = new MemoryStream())
+            {
+                stream.CopyTo(memory);
+                bytes = memory.ToArray();
+            }
+            if (File.Exists(target) && System.Linq.Enumerable.SequenceEqual(File.ReadAllBytes(target), bytes)) return;
+            Directory.CreateDirectory(Path.GetDirectoryName(target));
+            File.WriteAllBytes(target, bytes);
+            if (!changes.Contains("extension files")) changes.Add("extension files");
+        }
+
         public static string SelfPath { get { return Assembly.GetExecutingAssembly().Location; } }
 
         public static bool RunningInstalledCopy
@@ -186,6 +228,8 @@ namespace BookmarkSync
                     }
                 }
             }
+
+            WriteExtensions(changes);
 
             Config config = Config.Load();
             string exe = Env.InstalledExe;

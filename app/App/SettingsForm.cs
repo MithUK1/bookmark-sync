@@ -24,6 +24,7 @@ namespace BookmarkSync
         private readonly Config original;
         private readonly CheckBox dedupe = new CheckBox();
         private readonly CheckBox startup = new CheckBox();
+        private readonly CheckBox ask = new CheckBox();
         private readonly ComboBox master = new ComboBox();
         private readonly NumericUpDown keep = new NumericUpDown();
 
@@ -39,12 +40,12 @@ namespace BookmarkSync
             Theme.Chrome(this);
 
             Controls.Add(Theme.Heading("Duplicates", 16, 20));
-            dedupe.Text = "Remove duplicate bookmarks";
+            dedupe.Text = "Delete duplicate bookmarks";
             dedupe.AutoSize = true;
             dedupe.Location = new Point(16, 44);
             dedupe.Checked = config.RemoveDuplicates;
             Controls.Add(dedupe);
-            Controls.Add(Theme.SmallPrint("Keeps one copy of each address, preferring the bookmarks bar.", 34, 68, 390));
+            Controls.Add(Theme.SmallPrint("Off by default. When on, one copy of each address is kept, preferring the bookmarks bar.", 34, 68, 390));
 
             Controls.Add(Theme.Heading("Master browser", 16, 104));
             master.DropDownStyle = ComboBoxStyle.DropDownList;
@@ -95,6 +96,7 @@ namespace BookmarkSync
                 if (!Theme.Confirm("Put every setting back to its default? Bookmarks and backups are not touched.", "Restore defaults")) return;
                 var d = new Config();
                 dedupe.Checked = d.RemoveDuplicates;
+                ask.Checked = d.AskAboutDuplicates;
                 startup.Checked = d.StartWithWindows;
                 keep.Value = d.AutoBackupsToKeep;
                 master.SelectedIndex = 0;
@@ -120,6 +122,19 @@ namespace BookmarkSync
             };
             Controls.Add(repair);
 
+            // Room for the question about new duplicates under the duplicates section.
+            foreach (Control control in Controls)
+            {
+                if (control.Top >= 100) control.Top += 56;
+            }
+            ClientSize = new Size(440, 616);
+            ask.Text = "Ask before a new duplicate stays";
+            ask.AutoSize = true;
+            ask.Location = new Point(16, 104);
+            ask.Checked = config.AskAboutDuplicates;
+            Controls.Add(ask);
+            Controls.Add(Theme.SmallPrint("When you add a bookmark that already exists, the browser shows where the other one is and lets you keep or remove it. Kept duplicates sync to the other browsers.", 34, 128, 390, 44));
+
             var save = Theme.Button("Save", 16, 512, 90, primary: true);
             save.Click += (s, e) => SaveAndClose();
             Controls.Add(save);
@@ -134,6 +149,7 @@ namespace BookmarkSync
         {
             config.RemoveDuplicates = dedupe.Checked;
             config.StartWithWindows = startup.Checked;
+            config.AskAboutDuplicates = ask.Checked;
             config.AutoBackupsToKeep = (int)keep.Value;
             config.MasterBrowser = MasterChoices[master.SelectedIndex][0];
             try

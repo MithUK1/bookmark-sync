@@ -7,7 +7,9 @@ namespace BookmarkSync
     /// <summary>The settings in config.json, over defaults. A broken file never stops start-up.</summary>
     public sealed class Config
     {
-        public bool RemoveDuplicates = true;
+        public bool RemoveDuplicates = false;
+        /// <summary>When duplicates are kept, the browser asks before a new duplicate stays.</summary>
+        public bool AskAboutDuplicates = true;
         public int AutoBackupsToKeep = 40;
         public int DailiesToKeep = 7;
         public int WeekliesToKeep = 4;
@@ -37,6 +39,7 @@ namespace BookmarkSync
                 var root = Json.Obj(Json.Parse(Env.ReadText(Env.ConfigFile)));
                 if (root == null) throw new FormatException("The file does not hold a settings object.");
                 config.RemoveDuplicates = Json.Bool(Json.Get(root, "RemoveDuplicates"), config.RemoveDuplicates);
+                config.AskAboutDuplicates = Json.Bool(Json.Get(root, "AskAboutDuplicates"), config.AskAboutDuplicates);
                 config.AutoBackupsToKeep = Json.Int(Json.Get(root, "AutoBackupsToKeep"), config.AutoBackupsToKeep);
                 config.DailiesToKeep = Json.Int(Json.Get(root, "DailiesToKeep"), config.DailiesToKeep);
                 config.WeekliesToKeep = Json.Int(Json.Get(root, "WeekliesToKeep"), config.WeekliesToKeep);
@@ -72,6 +75,7 @@ namespace BookmarkSync
             Clamp();
             var d = new Dictionary<string, object>();
             d["RemoveDuplicates"] = RemoveDuplicates;
+            d["AskAboutDuplicates"] = AskAboutDuplicates;
             d["AutoBackupsToKeep"] = AutoBackupsToKeep;
             d["DailiesToKeep"] = DailiesToKeep;
             d["WeekliesToKeep"] = WeekliesToKeep;
