@@ -16,9 +16,10 @@ Firefox: News                  Firefox: Recipes, News, Weather
 - Keeps one master list of bookmarks on this computer and brings every browser in line with it.
 - First sync of a browser adds everything it has and removes nothing. After that, adds and deletes in any browser reach the others.
 - Removes duplicates (optional). The same address is kept once, preferring the bookmarks bar. `www.`, a trailing slash and tracking codes do not make two addresses different.
-- Backs up automatically before changes, and on demand. Each backup is a `.html` file (imports into any browser) and a `.json` file (restore it from the window).
+- Backs up each browser separately, labelled by kind: before a change, daily (first sync after midnight), monthly, yearly, and manual. Daily ones are kept 30 days, monthly 12, yearly always. Each backup is a `.html` file (imports into any browser) and a `.json` file (restore it from the window).
 - Keeps the same folders in the same order in every browser, so the bookmarks bars and folders look alike. If you reorder a folder in one browser, that order is used.
 - **View master list** shows the one list every browser is kept to match.
+- **Master browser** (Settings, optional): pick one browser, or Automatic (Firefox, then Chrome, then Edge), and the others copy it exactly: its adds, deletes, moves between folders, renames and order. Anything changed in the other browsers is put back. An empty list from the master browser is ignored.
 - Never touches browser pages such as `chrome://` or `about:`.
 - Nothing runs between syncs. The browser starts the helper when it needs it, and it exits straight after.
 
@@ -48,7 +49,11 @@ Settings are in the window under **Settings**, and in `%LOCALAPPDATA%\BookmarkSy
 | --- | --- | --- |
 | `RemoveDuplicates` | `true` | Keep one copy of each address, preferring the bookmarks bar. |
 | `PollMinutes` | `1` | How often each browser checks for changes (1 to 60). Reload the extension after changing it. |
-| `AutoBackupsToKeep` | `40` | How many automatic backups to keep (5 to 500). Backups you make are always kept. |
+| `AutoBackupsToKeep` | `40` | How many before-a-change backups to keep per browser (5 to 500). Backups you make are always kept. |
+| `DailyDaysToKeep` | `30` | How many days of daily backups to keep. |
+| `MonthlyToKeep` | `12` | How many monthly backups to keep per browser. |
+| `MasterBrowser` | `off` | `off`, `auto`, `firefox`, `chrome` or `edge`. The browser the others copy. |
+| `BrowserPriority` | `firefox,chrome,edge` | Order used when `MasterBrowser` is `auto`. |
 | `WindowLeft`, `WindowTop` | `-1` | Where the window was last placed. `-1` centres it. |
 
 Everything else lives in the same folder: `state.json` (master list and what each browser last had), `Backups\`, and `BookmarkSync.log`.
@@ -59,7 +64,7 @@ Everything else lives in the same folder: `state.json` (master list and what eac
 powershell -File tests\BookmarkSync.Tests.ps1
 ```
 
-Covers the address rules, duplicates, merging between browsers, folder order, backups and restore, the settings file and the message format the browsers use.
+Covers the address rules, duplicates, merging between browsers, folder order, the master browser, backups and how long they are kept, restore, the settings file and the message format the browsers use.
 
 ## Privacy
 
@@ -77,3 +82,5 @@ Bookmarks never leave this computer. The extension talks only to the Bookmark Sy
 - New bookmarks are added at the end of their folder, so exact order is not synced.
 - The Firefox bookmarks menu and other bookmarks count as one area.
 - Removing Bookmark Sync: **Settings > Remove all app data**. It unregisters the helper, removes the shortcuts and sends the app folder to the Recycle Bin. Remove the extension from each browser yourself.
+
+The extension's reorder step has its own check against a fake bookmarks API: `node tests/reorder.test.js`, also with `chrome` or `firefox` as an argument.

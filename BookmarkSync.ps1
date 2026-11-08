@@ -40,7 +40,7 @@ param(
 # ============================================================================
 
 $Script:AppTitle   = 'Bookmark Sync'
-$Script:AppVersion = '0.2.0'
+$Script:AppVersion = '0.3.0'
 $Script:VersionTag = "v$($Script:AppVersion) - MUK1"
 
 # The name each browser uses to find this helper, and the extensions allowed
@@ -61,6 +61,7 @@ $Script:StateFile       = Join-Path $Script:DataDir 'state.json'
 $Script:ConfigFile      = Join-Path $Script:DataDir 'config.json'
 $Script:BackupDir       = Join-Path $Script:DataDir 'Backups'
 $Script:PlanDir         = Join-Path $Script:DataDir 'Plans'
+$Script:StatusFile      = Join-Path $Script:DataDir 'status.json'
 $Script:LogPath         = Join-Path $Script:DataDir 'BookmarkSync.log'
 $Script:InstalledScript = Join-Path $Script:DataDir 'BookmarkSync.ps1'
 $Script:LauncherFile    = Join-Path $Script:DataDir 'BookmarkSyncHost.cmd'
@@ -81,10 +82,6 @@ $Script:HostRegistryKeys = @(
 $Script:PathSep = [string][char]0x1f
 $Script:KeySep  = [string][char]0x1e
 
-# A new automatic backup is taken at most this often (seconds) while
-# browsers are changing things.
-$Script:AutoBackupGap = 600
-
 # Native messages from the helper to a browser are capped at 1 MB, so large
 # replies are sent in pieces of this many bytes (before base64).
 $Script:PartBytes = 700000
@@ -96,6 +93,10 @@ $Script:DefaultConfig = [ordered]@{
     RemoveDuplicates  = $true
     PollMinutes       = 1
     AutoBackupsToKeep = 40
+    DailyDaysToKeep   = 30
+    MonthlyToKeep     = 12
+    MasterBrowser     = 'off'
+    BrowserPriority   = 'firefox,chrome,edge'
     WindowLeft        = -1
     WindowTop         = -1
 }
@@ -181,6 +182,8 @@ function Read-Config {
                     $default = $Script:DefaultConfig[$name]
                     if ($default -is [bool]) {
                         $config[$name] = [bool]$property.Value
+                    } elseif ($default -is [string]) {
+                        $config[$name] = ([string]$property.Value).Trim().ToLowerInvariant()
                     } else {
                         $config[$name] = [int]$property.Value
                     }
@@ -195,6 +198,11 @@ function Read-Config {
     if ($config.PollMinutes -gt 60) { $config.PollMinutes = 60 }
     if ($config.AutoBackupsToKeep -lt 5) { $config.AutoBackupsToKeep = 5 }
     if ($config.AutoBackupsToKeep -gt 500) { $config.AutoBackupsToKeep = 500 }
+    if ($config.DailyDaysToKeep -lt 1) { $config.DailyDaysToKeep = 1 }
+    if ($config.DailyDaysToKeep -gt 3650) { $config.DailyDaysToKeep = 3650 }
+    if ($config.MonthlyToKeep -lt 1) { $config.MonthlyToKeep = 1 }
+    if ($config.MonthlyToKeep -gt 600) { $config.MonthlyToKeep = 600 }
+    if (@('off', 'auto', 'chrome', 'edge', 'firefox') -notcontains $config.MasterBrowser) { $config.MasterBrowser = 'off' }
     return @{ Config = $config; Problem = $problem }
 }
 
@@ -211,7 +219,7 @@ function New-SyncState {
         revision          = 1
         browsers          = @{}
         pending_overwrite = (ConvertTo-List $null)
-        last_auto_backup  = 0
+        backup_marks      = @{}
     }
 }
 
@@ -243,7 +251,17 @@ function Read-SyncState {
         }
     }
     $state.pending_overwrite = ConvertTo-List $raw.pending_overwrite
-    if ($raw.last_auto_backup) { $state.last_auto_backup = [double]$raw.last_auto_backup }
+    if ($raw.backup_marks) {
+        foreach ($property in $raw.backup_marks.PSObject.Properties) {
+            $mark = $property.Value
+            $state.backup_marks[$property.Name] = @{
+                daily   = [string]$mark.daily
+                monthly = [string]$mark.monthly
+                yearly  = [string]$mark.yearly
+                hash    = [string]$mark.hash
+            }
+        }
+    }
     return $state
 }
 
@@ -251,6 +269,13 @@ function Read-SyncState {
 function Save-SyncState {
     param([Parameter(Mandatory)]$State)
     Write-FileSafely -Path $Script:StateFile -Text (ConvertTo-Json -InputObject $State -Depth 12 -Compress)
+
+    # A small copy of what a browser's quick "anything new?" check needs, so
+    # that check does not have to read the whole state.
+    $applied = @{}
+    foreach ($name in $State.browsers.Keys) { $applied[$name] = $State.browsers[$name].applied }
+    $status = @{ revision = $State.revision; pending = @($State.pending_overwrite); applied = $applied }
+    Write-FileSafely -Path $Script:StatusFile -Text (ConvertTo-Json -InputObject $status -Depth 4 -Compress)
 }
 
 # Runs a block while holding a lock shared by every copy of this script, so
@@ -669,22 +694,46 @@ function Invoke-BrowserSync {
     $current = ConvertTo-BookmarkMap $snap.bookmarks
     $currentFolders = ConvertTo-FolderMap $snap.folders
     $currentOrder = ConvertTo-OrderMap $snap.order
-    $entry.snapshot = @{ bookmarks = @($current.Values); folders = @($currentFolders.Values) }
+    $entry.snapshot = @{ bookmarks = @($current.Values); folders = @($currentFolders.Values); order = $snap.order }
     $entry.seen = Get-UnixTime
 
     $before = ConvertTo-Json -InputObject $State.master -Depth 8 -Compress
     $master = ConvertTo-BookmarkMap $State.master.bookmarks
     $masterFolders = ConvertTo-FolderMap $State.master.folders
     $masterOrder = ConvertTo-OrderMap $State.master.order
-    $oldKeys = @($master.Keys)
     $firstSync = $null -eq $entry.last
     $name = $Script:BrowserNames[$Browser]
     $activity = $false
 
+    # With a master browser chosen, its bookmarks are the master list and
+    # the others only follow. Until the master browser has synced once, the
+    # others take part normally so nothing is lost.
+    $source = Get-MirrorSource -State $State -Config $Config -Current $Browser
+    $isSource = $source -eq $Browser
+    $follows = $source -and -not $isSource -and $State.browsers.ContainsKey($source) -and $null -ne $State.browsers[$source].last
+
     if ($State.pending_overwrite.Contains($Browser)) {
+        # After a restore every browser, the master browser too, takes the
+        # master list once.
         [void]$State.pending_overwrite.Remove($Browser)
         $note = 'changed to match the master list'
         $activity = $true
+    } elseif ($isSource) {
+        if ($current.Count -eq 0 -and $master.Count -gt 0) {
+            # An empty profile must not wipe every other browser.
+            $note = 'sent an empty list, ignored'
+            $activity = $true
+        } else {
+            $master = [ordered]@{}
+            foreach ($key in $current.Keys) { $master[$key] = $current[$key] }
+            $masterFolders = @{}
+            foreach ($key in $currentFolders.Keys) { $masterFolders[$key] = $currentFolders[$key] }
+            $masterOrder = @{}
+            foreach ($key in $currentOrder.Keys) { $masterOrder[$key] = [System.Collections.Generic.List[string]]::new($currentOrder[$key]) }
+            $note = 'is the master browser'
+        }
+    } elseif ($follows) {
+        $note = "follows $($Script:BrowserNames[$source])"
     } else {
         $last = @{}
         foreach ($key in (ConvertTo-List $entry.last)) { $last[$key] = $true }
@@ -721,13 +770,6 @@ function Invoke-BrowserSync {
     Add-ParentFolders -Map $master -Folders $masterFolders
     Complete-FolderOrder -Order $masterOrder -Map $master -Folders $masterFolders
 
-    $changed = -not (Test-SameKeys $master.Keys $oldKeys) -or -not (Test-SameKeys $master.Keys $current.Keys)
-    $stale = (Get-UnixTime) - $State.last_auto_backup -gt $Script:AutoBackupGap
-    if ($changed -and ($firstSync -or $stale)) {
-        New-Backup -State $State -Reason 'auto' -Browser $Browser -IncludeSeen -Config $Config | Out-Null
-        $State.last_auto_backup = Get-UnixTime
-    }
-
     $State.master = @{
         bookmarks = (ConvertTo-List $master.Values)
         folders   = (Get-SortedFolders $masterFolders)
@@ -742,13 +784,48 @@ function Invoke-BrowserSync {
     $unchanged = (Test-SameKeys $master.Keys $current.Keys) -and
         (Test-SameKeys $masterFolders.Keys $currentFolders.Keys) -and
         (Test-OrderMatches -MasterOrder $masterOrder -CurrentOrder $currentOrder)
+    if ($unchanged -and $follows) { $unchanged = Test-TitlesMatch -Master $master -Current $current }
+
+    # Back up this browser as it is now, before anything changes it.
+    Invoke-ScheduledBackups -State $State -Browser $Browser -Snapshot $snap -Changing (-not $unchanged) -Config $Config
+
     if ($unchanged) {
         $entry.applied = $State.revision
         $entry.last = ConvertTo-List $current.Keys
         $entry.last_folders = ConvertTo-List $currentFolders.Values
         $entry.last_order = $snap.order
     }
-    return @{ Unchanged = $unchanged }
+    return @{ Unchanged = $unchanged; Mirror = [bool]$follows }
+}
+
+# True when every bookmark both lists have carries the same title.
+function Test-TitlesMatch {
+    param($Master, $Current)
+    foreach ($key in $Current.Keys) {
+        if ($Master.Contains($key) -and [string]$Master[$key].title -cne [string]$Current[$key].title) { return $false }
+    }
+    return $true
+}
+
+# The browser the others copy, or null when none is chosen (or, in
+# automatic mode, none has synced). Automatic picks the first browser in the
+# priority list that has synced, counting the one syncing now.
+function Get-MirrorSource {
+    param(
+        [Parameter(Mandatory)]$State,
+        [Parameter(Mandatory)]$Config,
+        [string]$Current
+    )
+    $mode = [string]$Config.MasterBrowser
+    if ($Script:BrowserNames.ContainsKey($mode)) { return $mode }
+    if ($mode -ne 'auto') { return $null }
+    foreach ($candidate in ([string]$Config.BrowserPriority).Split(',')) {
+        $candidate = $candidate.Trim().ToLowerInvariant()
+        if (-not $Script:BrowserNames.ContainsKey($candidate)) { continue }
+        if ($candidate -eq $Current) { return $candidate }
+        if ($State.browsers.ContainsKey($candidate) -and $null -ne $State.browsers[$candidate].last) { return $candidate }
+    }
+    return $null
 }
 
 # Records what a browser looks like after it has applied the master list,
@@ -769,7 +846,7 @@ function Complete-BrowserSync {
     $entry.last_folders = $snap.folders
     $entry.last_order = $snap.order
     $entry.applied = $Revision
-    $entry.snapshot = @{ bookmarks = @($current.Values); folders = $snap.folders }
+    $entry.snapshot = @{ bookmarks = @($current.Values); folders = $snap.folders; order = $snap.order }
     $entry.seen = Get-UnixTime
 
     if ($Stats -and ($Stats.created -or $Stats.deleted -or $Stats.moved -or $Stats.errors)) {
@@ -836,55 +913,137 @@ function Add-BookmarkHtmlNode {
     }
 }
 
-# Saves the master list (and, with -IncludeSeen, what each browser last
-# had) as a .json and .html pair. -Browser names the browser whose sync
-# caused it, or 'all' when it covers every browser. Old automatic backups
-# beyond the number kept in Settings are removed; manual ones are kept.
+# Saves one browser's bookmarks (or, with Browser 'all', the master list) as
+# a .json and .html pair named by time, browser and kind. Kinds: change (a
+# browser is about to be changed), daily, monthly, yearly, manual and
+# before-restore. The .json restores from this window, the .html imports
+# into any browser.
 function New-Backup {
     param(
         [Parameter(Mandatory)]$State,
-        [Parameter(Mandatory)][string]$Reason,
+        [Parameter(Mandatory)][string]$Kind,
         [string]$Browser = 'all',
-        [switch]$IncludeSeen,
+        $Snapshot,
         $Config
     )
     if (-not (Test-Path $Script:BackupDir)) { New-Item -Path $Script:BackupDir -ItemType Directory -Force | Out-Null }
 
+    if ($Browser -eq 'all') {
+        $content = @{ bookmarks = $State.master.bookmarks; folders = $State.master.folders; order = $State.master.order }
+    } else {
+        if (-not $Snapshot) { $Snapshot = $State.browsers[$Browser].snapshot }
+        $content = @{ bookmarks = $Snapshot.bookmarks; folders = $Snapshot.folders; order = $Snapshot.order }
+    }
+
     # Milliseconds keep two backups in the same second apart.
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmssfff'
-    $name = "bookmarks-$stamp-$Browser-$Reason"
-    $snapshots = @{}
-    foreach ($browser in $State.browsers.Keys) { $snapshots[$browser] = $State.browsers[$browser].snapshot }
-
-    $payload = [ordered]@{ version = 1; created = $stamp; reason = $Reason; browser = $Browser; master = $State.master; browsers = $snapshots }
+    $name = "bookmarks-$stamp-$Browser-$Kind"
+    $payload = [ordered]@{ version = 2; created = $stamp; kind = $Kind; browser = $Browser; master = $content }
     Write-FileSafely -Path (Join-Path $Script:BackupDir "$name.json") -Text (ConvertTo-Json -InputObject $payload -Depth 12 -Compress)
-
-    # The .html copy also holds anything a browser had that the master does
-    # not, so a backup never loses a bookmark that was about to be removed.
-    $export = ConvertTo-BookmarkMap $State.master.bookmarks
-    if ($IncludeSeen) {
-        foreach ($snapshot in $snapshots.Values) {
-            if ($null -eq $snapshot) { continue }
-            $seen = ConvertTo-BookmarkMap $snapshot.bookmarks
-            foreach ($key in $seen.Keys) { if (-not $export.Contains($key)) { $export[$key] = $seen[$key] } }
-        }
-    }
-    Write-FileSafely -Path (Join-Path $Script:BackupDir "$name.html") -Text (ConvertTo-BookmarkHtml $export.Values)
-
-    $keep = 40
-    if ($Config) { $keep = [int]$Config.AutoBackupsToKeep }
-    $auto = @(Get-ChildItem -Path $Script:BackupDir -Filter '*-auto.json' | Sort-Object Name)
-    if ($auto.Count -gt $keep) {
-        foreach ($old in $auto[0..($auto.Count - $keep - 1)]) {
-            Remove-Item -Path $old.FullName -ErrorAction SilentlyContinue
-            Remove-Item -Path ([System.IO.Path]::ChangeExtension($old.FullName, '.html')) -ErrorAction SilentlyContinue
-        }
-    }
+    Write-FileSafely -Path (Join-Path $Script:BackupDir "$name.html") -Text (ConvertTo-BookmarkHtml (ConvertTo-List $content.bookmarks))
     Write-AppLog "Backup saved: $name"
     return $name
 }
 
-# Lists backups newest first, with a readable date, browser and type.
+# A fingerprint of a browser's bookmarks and their order, to avoid saving
+# the same backup twice.
+function Get-SnapshotHash {
+    param([Parameter(Mandatory)]$Snapshot)
+    $keys = @((ConvertTo-BookmarkMap $Snapshot.bookmarks).Keys | Sort-Object)
+    $text = ($keys -join $Script:KeySep) + (ConvertTo-Json -InputObject @($Snapshot.order) -Depth 6 -Compress)
+    $sha = [System.Security.Cryptography.SHA1]::Create()
+    try {
+        return [BitConverter]::ToString($sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($text)))
+    } finally {
+        $sha.Dispose()
+    }
+}
+
+# Takes the backups due for one browser, from what it has right now (so
+# before a sync changes it): the first of each day, month and year, and one
+# whenever it is about to be changed and differs from its last backup. The
+# daily one is taken at the first sync after midnight, which is the next
+# time the browser is open if the computer was off. Then trims old ones.
+function Invoke-ScheduledBackups {
+    param(
+        [Parameter(Mandatory)]$State,
+        [Parameter(Mandatory)][string]$Browser,
+        [Parameter(Mandatory)]$Snapshot,
+        [Parameter(Mandatory)][bool]$Changing,
+        [Parameter(Mandatory)]$Config
+    )
+    if (@($Snapshot.bookmarks).Count -eq 0) { return }
+    if (-not $State.backup_marks.ContainsKey($Browser)) {
+        $State.backup_marks[$Browser] = @{ daily = ''; monthly = ''; yearly = ''; hash = '' }
+    }
+    $marks = $State.backup_marks[$Browser]
+    $now = Get-Date
+    $day = $now.ToString('yyyyMMdd')
+    $month = $now.ToString('yyyyMM')
+    $year = $now.ToString('yyyy')
+
+    try {
+        if ($marks.daily -ne $day) {
+            New-Backup -State $State -Kind 'daily' -Browser $Browser -Snapshot $Snapshot | Out-Null
+            $marks.daily = $day
+            $marks.hash = Get-SnapshotHash $Snapshot
+            if ($marks.monthly -ne $month) {
+                New-Backup -State $State -Kind 'monthly' -Browser $Browser -Snapshot $Snapshot | Out-Null
+                $marks.monthly = $month
+            }
+            if ($marks.yearly -ne $year) {
+                New-Backup -State $State -Kind 'yearly' -Browser $Browser -Snapshot $Snapshot | Out-Null
+                $marks.yearly = $year
+            }
+        } elseif ($Changing) {
+            $hash = Get-SnapshotHash $Snapshot
+            if ($marks.hash -ne $hash) {
+                New-Backup -State $State -Kind 'change' -Browser $Browser -Snapshot $Snapshot | Out-Null
+                $marks.hash = $hash
+            }
+        }
+        Remove-OldBackups -Config $Config
+    } catch {
+        # A backup problem must not stop the sync, but it must be visible.
+        Write-AppLog "Backup failed: $($_.Exception.Message)"
+    }
+}
+
+# Removes backups past their keep rules: change backups beyond the number
+# kept, daily ones older than the days kept, monthly ones beyond the months
+# kept. Yearly, manual and before-restore backups are never removed.
+function Remove-OldBackups {
+    param([Parameter(Mandatory)]$Config)
+    if (-not (Test-Path $Script:BackupDir)) { return }
+    $rows = [System.Collections.Generic.List[object]]::new()
+    foreach ($file in (Get-ChildItem -Path $Script:BackupDir -Filter 'bookmarks-*.json')) {
+        $match = [regex]::Match($file.BaseName, '^bookmarks-(\d{8})-\d{6}\d{0,3}-(?:(chrome|edge|firefox|all)-)?(.+)$')
+        if (-not $match.Success) { continue }
+        $rows.Add([pscustomobject]@{
+            File    = $file
+            Date    = [datetime]::ParseExact($match.Groups[1].Value, 'yyyyMMdd', $null)
+            Browser = $(if ($match.Groups[2].Success) { $match.Groups[2].Value } else { 'all' })
+            Kind    = $match.Groups[3].Value
+        })
+    }
+    $doomed = [System.Collections.Generic.List[object]]::new()
+    foreach ($group in ($rows | Where-Object { $_.Kind -eq 'change' -or $_.Kind -eq 'auto' } | Group-Object Browser)) {
+        $sorted = @($group.Group | Sort-Object { $_.File.Name } -Descending)
+        if ($sorted.Count -gt $Config.AutoBackupsToKeep) { $doomed.AddRange(@($sorted[$Config.AutoBackupsToKeep..($sorted.Count - 1)])) }
+    }
+    $limit = (Get-Date).Date.AddDays(-[int]$Config.DailyDaysToKeep)
+    foreach ($row in ($rows | Where-Object { $_.Kind -eq 'daily' -and $_.Date -lt $limit })) { $doomed.Add($row) }
+    foreach ($group in ($rows | Where-Object { $_.Kind -eq 'monthly' } | Group-Object Browser)) {
+        $sorted = @($group.Group | Sort-Object { $_.File.Name } -Descending)
+        if ($sorted.Count -gt $Config.MonthlyToKeep) { $doomed.AddRange(@($sorted[$Config.MonthlyToKeep..($sorted.Count - 1)])) }
+    }
+    foreach ($row in $doomed) {
+        Remove-Item -Path $row.File.FullName -ErrorAction SilentlyContinue
+        Remove-Item -Path ([System.IO.Path]::ChangeExtension($row.File.FullName, '.html')) -ErrorAction SilentlyContinue
+    }
+}
+
+# Lists backups newest first, with a readable date, browser and kind.
 # Names from before the browser was recorded still read, as all browsers.
 function Get-BackupList {
     if (-not (Test-Path $Script:BackupDir)) { return @() }
@@ -898,9 +1057,13 @@ function Get-BackupList {
             $browser = $Script:BrowserNames[$match.Groups[3].Value]
         }
         $type = switch ($match.Groups[4].Value) {
-            'auto'           { 'Automatic' }
+            'change'         { 'Before a change' }
+            'daily'          { 'Daily' }
+            'monthly'        { 'Monthly' }
+            'yearly'         { 'Yearly' }
             'manual'         { 'Manual' }
             'before-restore' { 'Before restore' }
+            'auto'           { 'Automatic (older)' }
             'before-source'  { 'Before use as source' }
             default          { $match.Groups[4].Value }
         }
@@ -919,7 +1082,7 @@ function Restore-Backup {
     )
     $path = Join-Path $Script:BackupDir ([System.IO.Path]::GetFileName($Name) + '.json')
     $payload = Get-Content -Path $path -Raw -Encoding UTF8 | ConvertFrom-Json
-    New-Backup -State $State -Reason 'before-restore' -IncludeSeen -Config $Config | Out-Null
+    New-Backup -State $State -Kind 'before-restore' -Browser 'all' -Config $Config | Out-Null
     $State.master = @{
         bookmarks = (ConvertTo-List $payload.master.bookmarks)
         folders   = (ConvertTo-List $payload.master.folders)
@@ -997,6 +1160,7 @@ function Get-PlanFile {
 # Answers one request from a browser. Returns the reply to send back.
 #
 #   status  - is the helper installed, and which version
+#   check   - quick: is this browser already up to date with the master list
 #   sync    - merge this browser's bookmarks, reply with the master list
 #             (first piece) or unchanged
 #   part    - send a further piece of the master list
@@ -1027,6 +1191,15 @@ function Invoke-HostRequest {
     }
 
     $config = (Read-Config).Config
+    if ($type -eq 'check') {
+        $current = $false
+        if (Test-Path $Script:StatusFile) {
+            $status = Get-Content -Path $Script:StatusFile -Raw -Encoding UTF8 | ConvertFrom-Json
+            $applied = $status.applied.PSObject.Properties[$browser]
+            $current = $applied -and ([int]$applied.Value -eq [int]$status.revision) -and (@($status.pending) -notcontains $browser)
+        }
+        return @{ ok = $true; current = [bool]$current; pollMinutes = $config.PollMinutes }
+    }
     $script:reply = $null
     $null = Invoke-WithStateLock {
         $state = Read-SyncState
@@ -1039,7 +1212,7 @@ function Invoke-HostRequest {
                 $text = ConvertTo-Json -InputObject $state.master -Depth 6 -Compress
                 Write-FileSafely -Path (Get-PlanFile $browser) -Text $text
                 $parts = Split-ReplyParts $text
-                $script:reply = @{ ok = $true; unchanged = $false; revision = $state.revision; pollMinutes = $config.PollMinutes; part = 0; parts = $parts.Count; data = $parts[0] }
+                $script:reply = @{ ok = $true; unchanged = $false; mirror = $result.Mirror; revision = $state.revision; pollMinutes = $config.PollMinutes; part = 0; parts = $parts.Count; data = $parts[0] }
             }
         } elseif ($type -eq 'ack') {
             Complete-BrowserSync -State $state -Browser $browser -Snapshot $Request -Stats $Request.stats -Revision ([int]$Request.revision)
@@ -1506,13 +1679,24 @@ The list shows each browser that has synced, how many bookmarks it had and
 when. View master list shows the one list every browser is kept to match,
 folders and order included.
 
+MASTER BROWSER
+Settings > Master browser makes one browser the one the others copy. Its
+adds, deletes, moves between folders, renames and order are copied to the
+other browsers, and anything changed in the others is put back. Automatic
+uses the first browser in the priority list (Firefox, Chrome, Edge) that
+has synced. Off treats every browser equally, merging all their changes.
+If the master browser sends an empty list it is ignored.
+
 BACKUPS (UNDO)
-A backup is taken automatically before changes, at most every 10 minutes,
-and before any restore. Back up now takes one straight away. Each backup is
-a .json file (restore it here) and a .html file (import it into any
-browser). Restore makes the selected backup the master list again, after
-backing up the current one, and every browser changes to match on its next
-sync. Restoring the newest automatic backup is the way to undo a sync.
+Each browser has its own backups, labelled by kind: Before a change (taken
+just before a sync changes that browser), Daily (the first sync after
+midnight, so the next time the browser is open if the computer was off),
+Monthly and Yearly (the first of each), and Manual (Back up now, one per
+browser). Daily ones are kept 30 days, monthly 12, yearly and manual
+always. Each backup is a .json file (restore it here) and a .html file
+(import it into any browser). Restore makes the selected backup the master
+list again, after backing up the current one, and every browser changes to
+match on its next sync.
 
 DUPLICATES
 With Remove duplicate bookmarks on, the same address is kept once. A copy
@@ -1522,9 +1706,10 @@ codes count as the same.
 
 LIMITS
 All browsers are kept with the same folders and the same order in each
-folder. If you reorder a folder in one browser, that order is used. Edited
-titles of existing bookmarks are not synced yet. The Firefox bookmarks
-menu and other bookmarks count as one area.
+folder. With no master browser, a reorder in one browser is used, and edited
+titles of existing bookmarks are not synced. With a master browser, titles
+are copied too. The Firefox bookmarks menu and other bookmarks count as
+one area.
 Browser pages such as chrome:// and about: are never synced or changed.
 
 SETTINGS
@@ -1577,7 +1762,7 @@ function Show-SettingsWindow {
 
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "$($Script:AppTitle) - Settings"
-    $form.ClientSize = New-Object System.Drawing.Size(440, 530)
+    $form.ClientSize = New-Object System.Drawing.Size(440, 610)
     $form.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterParent
     Set-FormChrome $form
 
@@ -1590,7 +1775,7 @@ function Show-SettingsWindow {
     $form.Controls.Add($script:dedupeBox)
     $form.Controls.Add((New-SmallPrint 'Keeps one copy of each address, preferring the bookmarks bar.' 34 68 390))
 
-    $form.Controls.Add((New-Heading 'Automatic backups' 16 104))
+    $form.Controls.Add((New-Heading 'Backups' 16 104))
     $keepLabel = New-Object System.Windows.Forms.Label
     $keepLabel.Text = 'Keep the last'
     $keepLabel.AutoSize = $true
@@ -1604,11 +1789,11 @@ function Show-SettingsWindow {
     $script:keepBox.Width = 64
     $form.Controls.Add($script:keepBox)
     $keepTail = New-Object System.Windows.Forms.Label
-    $keepTail.Text = 'automatic backups'
+    $keepTail.Text = 'backups made before changes, per browser'
     $keepTail.AutoSize = $true
     $keepTail.Location = New-Object System.Drawing.Point(174, 132)
     $form.Controls.Add($keepTail)
-    $form.Controls.Add((New-SmallPrint 'Older automatic backups are removed. Ones you make are always kept.' 16 158 400))
+    $form.Controls.Add((New-SmallPrint 'Daily backups are kept 30 days, monthly 12, yearly always. Ones you make are always kept.' 16 158 400))
 
     $form.Controls.Add((New-Heading 'Checking for changes' 16 194))
     $pollLabel = New-Object System.Windows.Forms.Label
@@ -1630,35 +1815,52 @@ function Show-SettingsWindow {
     $form.Controls.Add($pollTail)
     $form.Controls.Add((New-SmallPrint 'How soon a browser notices changes made in another. Reload the extension after changing it.' 16 248 400))
 
-    $form.Controls.Add((New-Heading 'Help and files' 16 254))
-    $help = New-StyledButton -Text 'Help' -X 16 -Y 280 -Width 90
+    $form.Controls.Add((New-Heading 'Master browser' 16 274))
+    $script:masterBox = New-Object System.Windows.Forms.ComboBox
+    $script:masterBox.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
+    $script:masterBox.Location = New-Object System.Drawing.Point(16, 300)
+    $script:masterBox.Width = 400
+    $script:masterChoices = @(
+        @('off', 'Off - every browser is equal'),
+        @('auto', 'Automatic - Firefox, then Chrome, then Edge'),
+        @('firefox', 'Firefox'),
+        @('chrome', 'Chrome'),
+        @('edge', 'Edge'))
+    foreach ($choice in $script:masterChoices) { [void]$script:masterBox.Items.Add($choice[1]) }
+    $script:masterBox.SelectedIndex = [Math]::Max(0, @($script:masterChoices | ForEach-Object { $_[0] }).IndexOf($script:settingsConfig.MasterBrowser))
+    $form.Controls.Add($script:masterBox)
+    $form.Controls.Add((New-SmallPrint 'The other browsers copy the master browser: its adds, deletes, moves, renames and order. Changes made in the others are undone.' 16 328 410))
+
+    $form.Controls.Add((New-Heading 'Help and files' 16 334))
+    $help = New-StyledButton -Text 'Help' -X 16 -Y 360 -Width 90
     $help.Add_Click({ Show-HelpWindow $form })
     $form.Controls.Add($help)
-    $openSettings = New-StyledButton -Text 'Open settings file' -X 114 -Y 280 -Width 140
+    $openSettings = New-StyledButton -Text 'Open settings file' -X 114 -Y 360 -Width 140
     $openSettings.Add_Click({
         if (-not (Test-Path $Script:ConfigFile)) { Save-Config $script:settingsConfig }
         Start-Process notepad.exe -ArgumentList "`"$($Script:ConfigFile)`""
     })
     $form.Controls.Add($openSettings)
-    $openLog = New-StyledButton -Text 'Open log' -X 262 -Y 280 -Width 90
+    $openLog = New-StyledButton -Text 'Open log' -X 262 -Y 360 -Width 90
     $openLog.Add_Click({
         if (Test-Path $Script:LogPath) { Start-Process notepad.exe -ArgumentList "`"$($Script:LogPath)`"" }
     })
     $form.Controls.Add($openLog)
 
-    $form.Controls.Add((New-Heading 'Reset' 16 330))
-    $defaults = New-StyledButton -Text 'Restore defaults' -X 16 -Y 356 -Width 140
+    $form.Controls.Add((New-Heading 'Reset' 16 410))
+    $defaults = New-StyledButton -Text 'Restore defaults' -X 16 -Y 436 -Width 140
     $defaults.Add_Click({
         if (Confirm-Action 'Put every setting back to its default? Bookmarks and backups are not touched.' 'Restore defaults') {
             $script:dedupeBox.Checked = $Script:DefaultConfig.RemoveDuplicates
             $script:keepBox.Value = $Script:DefaultConfig.AutoBackupsToKeep
             $script:pollBox.Value = $Script:DefaultConfig.PollMinutes
+            $script:masterBox.SelectedIndex = 0
             $script:settingsConfig.WindowLeft = -1
             $script:settingsConfig.WindowTop = -1
         }
     })
     $form.Controls.Add($defaults)
-    $remove = New-StyledButton -Text 'Remove all app data' -X 164 -Y 356 -Width 160 -Warning
+    $remove = New-StyledButton -Text 'Remove all app data' -X 164 -Y 436 -Width 160 -Warning
     $remove.Add_Click({
         $message = "This takes Bookmark Sync off this computer:`r`n`r`n" +
             "- the browsers stop being able to sync (remove the extension yourself)`r`n" +
@@ -1676,7 +1878,7 @@ function Show-SettingsWindow {
         }
     })
     $form.Controls.Add($remove)
-    $repair = New-StyledButton -Text 'Repair install' -X 332 -Y 356 -Width 92
+    $repair = New-StyledButton -Text 'Repair install' -X 332 -Y 436 -Width 92
     $repair.Add_Click({
         try {
             $changes = Sync-Install -Force
@@ -1687,15 +1889,25 @@ function Show-SettingsWindow {
         }
     })
     $form.Controls.Add($repair)
-    $form.Controls.Add((New-SmallPrint 'Restore defaults resets settings only. Remove all app data uninstalls. Repair install fixes a broken install.' 16 394 410))
+    $form.Controls.Add((New-SmallPrint 'Restore defaults resets settings only. Remove all app data uninstalls. Repair install fixes a broken install.' 16 474 410))
 
-    $save = New-StyledButton -Text 'Save' -X 16 -Y 460 -Width 90 -Primary
+    $save = New-StyledButton -Text 'Save' -X 16 -Y 540 -Width 90 -Primary
     $save.Add_Click({
         $script:settingsConfig.RemoveDuplicates = $script:dedupeBox.Checked
         $script:settingsConfig.AutoBackupsToKeep = [int]$script:keepBox.Value
         $script:settingsConfig.PollMinutes = [int]$script:pollBox.Value
+        $oldMaster = (Read-Config).Config
+        $script:settingsConfig.MasterBrowser = $script:masterChoices[$script:masterBox.SelectedIndex][0]
         try {
             Save-Config $script:settingsConfig
+            # A change to how the master list is built makes every browser re-check.
+            if ($oldMaster.MasterBrowser -ne $script:settingsConfig.MasterBrowser -or $oldMaster.RemoveDuplicates -ne $script:settingsConfig.RemoveDuplicates) {
+                $null = Invoke-WithStateLock {
+                    $state = Read-SyncState
+                    $state.revision = [int]$state.revision + 1
+                    Save-SyncState $state
+                }
+            }
             Write-AppLog 'Settings saved'
             $form.Close()
         } catch {
@@ -1705,7 +1917,7 @@ function Show-SettingsWindow {
     $form.Controls.Add($save)
     $form.AcceptButton = $save
 
-    $close = New-StyledButton -Text 'Close' -X 314 -Y 460
+    $close = New-StyledButton -Text 'Close' -X 314 -Y 540
     $close.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
     $form.Controls.Add($close)
     $form.CancelButton = $close
@@ -1820,12 +2032,22 @@ function Update-BrowserList {
         Set-Status "The bookmark state could not be read. $($_.Exception.Message)" $Script:ColorErrorFg
         return
     }
+    $source = Get-MirrorSource -State $state -Config $script:mainConfig -Current ''
     foreach ($browser in ($state.browsers.Keys | Sort-Object)) {
         $entry = $state.browsers[$browser]
         $count = 0
         if ($entry.snapshot -and $entry.snapshot.bookmarks) { $count = @($entry.snapshot.bookmarks).Count }
         $next = ''
-        if ($state.pending_overwrite.Contains($browser)) { $next = 'Changes to match' }
+        if ($state.pending_overwrite.Contains($browser)) {
+            $next = 'Changes to match'
+        } elseif ($entry.seen -gt 0) {
+            # The browser checks on its own timer, so this is an estimate.
+            $due = $entry.seen + 60 * $script:mainConfig.PollMinutes - (Get-UnixTime)
+            if ($due -gt 60) { $next = "in about $([Math]::Ceiling($due / 60)) min" }
+            elseif ($due -gt 0) { $next = 'within a minute' }
+            else { $next = 'when the browser is open' }
+        }
+        if ($browser -eq $source) { $next = if ($next) { "Master browser, $next" } else { 'Master browser' } }
 
         $label = $Script:BrowserNames[$browser]
         if (-not $label) { $label = $browser }
@@ -1837,6 +2059,7 @@ function Update-BrowserList {
         [void]$script:browserList.Items.Add($item)
     }
     $script:masterLabel.Text = "Master list: $(@($state.master.bookmarks).Count) bookmarks"
+    if ($source) { $script:masterLabel.Text += ", copies $($Script:BrowserNames[$source])" }
 }
 
 # Fills the backup list from the backup folder.
@@ -1940,12 +2163,18 @@ function Show-MainWindow {
 
     $backupNow = New-StyledButton -Text 'Back up now' -X 16 -Y 512 -Width 120 -Primary
     $backupNow.Add_Click({
+        $script:backedUp = 0
         try {
             $null = Invoke-WithStateLock {
                 $state = Read-SyncState
-                $null = New-Backup -State $state -Reason 'manual' -IncludeSeen -Config $script:mainConfig
+                foreach ($browser in ($state.browsers.Keys | Sort-Object)) {
+                    if ($state.browsers[$browser].snapshot -and @($state.browsers[$browser].snapshot.bookmarks).Count -gt 0) {
+                        $null = New-Backup -State $state -Kind 'manual' -Browser $browser -Config $script:mainConfig
+                        $script:backedUp++
+                    }
+                }
             }
-            Set-Status 'Complete - backup saved.' $Script:ColorCurrentFg
+            Set-Status "Complete - $($script:backedUp) backup(s) saved, one per browser." $Script:ColorCurrentFg
             Update-BackupList
         } catch {
             Show-Error "The backup was not saved. $($_.Exception.Message)"

@@ -13,6 +13,12 @@ const ALLOWED_SCHEMES = ['http:', 'https:', 'ftp:', 'file:', 'javascript:'];
 const TRACKING = /^(utm_|fbclid$|gclid$|mc_eid$)/;
 const DEFAULT_POLL_MINUTES = 1;
 const CHANGE_DELAY_MS = 4000;
+// Most moves one sync makes, so a huge reshuffle cannot freeze the browser;
+// the rest is done by the next sync a few seconds later.
+const MAX_MOVES = 500;
+// After this many syncs in a row that change the same things, stop and wait.
+const STUCK_LIMIT = 3;
+const PAUSE_MS = 15 * 60 * 1000;
 
 // Browser differences in one place: the ids of the two areas that sync
 // (bookmarks bar and other bookmarks) and where new items go.
@@ -33,6 +39,10 @@ let running = false;
 let again = false;
 let applying = false;
 let timer = null;
+let dirtyStored = false;
+let lastSignature = '';
+let stuckCount = 0;
+let pausedUntil = 0;
 
 // Works out which browser this is, so the helper can tell them apart.
 function detectBrowser() {
@@ -169,8 +179,8 @@ async function fetchMaster(first) {
 // Changes this browser's bookmarks to match the master list: removes what
 // is not in it, adds what is missing, creates folders as needed, then
 // removes folders left empty that the master does not have.
-async function apply(target) {
-  const stats = { created: 0, deleted: 0, moved: 0, errors: 0 };
+async function apply(target, mirror) {
+  const stats = { created: 0, deleted: 0, moved: 0, errors: 0, capped: false };
   const wanted = new Map(target.bookmarks.map((bm) => [keyOf(bm.path, bm.url), bm]));
   const wantedFolders = new Set(target.folders.map((folder) => folder.join(SEP)));
 
@@ -191,6 +201,26 @@ async function apply(target) {
   }
 
   const afterDelete = await snapshot();
+
+  // With a master browser the titles are copied as well.
+  if (mirror) {
+    const titled = new Set();
+    for (const bm of afterDelete.bookmarks) {
+      const key = keyOf(bm.path, bm.url);
+      const goal = wanted.get(key);
+      if (!goal || titled.has(key)) continue;
+      titled.add(key);
+      if ((goal.title ?? '') !== bm.title) {
+        try {
+          await api.bookmarks.update(bm.id, { title: goal.title ?? '' });
+          stats.renamed = (stats.renamed ?? 0) + 1;
+        } catch {
+          stats.errors++;
+        }
+      }
+    }
+  }
+
   const folderIds = new Map();
   for (const folder of afterDelete.folders) {
     const key = folder.path.join(SEP);
@@ -242,23 +272,13 @@ async function apply(target) {
   return stats;
 }
 
-// Moves one item to a position in its folder and checks where it landed.
-// Chrome counts the target position before the item is lifted out, so a
-// move forward within the same folder can land one place early; if so, it
-// is moved once more.
-async function moveTo(id, parentId, index) {
-  await api.bookmarks.move(id, { parentId, index });
-  let children = await api.bookmarks.getChildren(parentId);
-  let actual = children.findIndex((child) => child.id === id);
-  if (actual !== index && actual >= 0) {
-    await api.bookmarks.move(id, { parentId, index: actual < index ? index + 1 : index - 1 });
-    children = await api.bookmarks.getChildren(parentId);
-  }
-  return children;
-}
-
-// Puts each folder's items in the master's order. Items the master does
-// not list (browser pages that never sync) are left where they are.
+// Puts each folder's items in the master's order, keeping track of the
+// folder's order in memory instead of asking the browser after every move.
+// Items the master does not list (browser pages that never sync) are left
+// where they are. Stops after MAX_MOVES and leaves the rest to the next sync.
+//
+// Each item is moved back to just before the one now in its place, never
+// forward, so the browsers' different rules for forward moves do not matter.
 async function reorder(order, stats) {
   const [tree] = await api.bookmarks.getTree();
   const folders = new Map();
@@ -277,8 +297,7 @@ async function reorder(order, stats) {
     const folder = folders.get(entry.path.join(SEP));
     if (!folder) continue;
     try {
-      let children = folder.children ?? [];
-      // Item ids by token, first copy only.
+      const children = folder.children ?? [];
       const idOf = new Map();
       for (const child of children) {
         const token = child.url !== undefined ? (syncable(child.url) ? bookmarkToken(child.url) : null) : folderToken(child.title);
@@ -286,12 +305,29 @@ async function reorder(order, stats) {
       }
       const wanted = entry.items.filter((token) => idOf.has(token)).map((token) => idOf.get(token));
       const wantedSet = new Set(wanted);
+      const full = children.map((child) => child.id);
+      const seq = full.filter((id) => wantedSet.has(id));
+
       for (let i = 0; i < wanted.length; i++) {
-        const current = children.filter((child) => wantedSet.has(child.id));
-        if (current[i].id === wanted[i]) continue;
-        const index = children.findIndex((child) => child.id === current[i].id);
-        children = await moveTo(wanted[i], folder.id, index);
+        if (seq[i] === wanted[i]) continue;
+        if (stats.moved >= MAX_MOVES) {
+          stats.capped = true;
+          return;
+        }
+        const from = full.indexOf(wanted[i]);
+        const target = full.indexOf(seq[i]);
+        await api.bookmarks.move(wanted[i], { parentId: folder.id, index: target });
         stats.moved++;
+        full.splice(from, 1);
+        full.splice(full.indexOf(seq[i]), 0, wanted[i]);
+        seq.splice(seq.indexOf(wanted[i]), 1);
+        seq.splice(i, 0, wanted[i]);
+      }
+
+      // One check per folder that the browser agreed with the model.
+      if (stats.moved > 0) {
+        const actual = (await api.bookmarks.getChildren(folder.id)).map((child) => child.id).filter((id) => wantedSet.has(id));
+        if (actual.some((id, i) => id !== wanted[i])) stats.errors++;
       }
     } catch {
       stats.errors++;
@@ -335,25 +371,49 @@ function describeError(err) {
 
 // Saves the last result for the popup and shows a red ! on failure.
 async function setStatus(ok, message) {
-  await api.storage.local.set({ status: { ok, message, at: Date.now() } });
+  // Repeating the same result only needs saving now and then.
+  const { status } = await api.storage.local.get('status');
+  if (!status || status.ok !== ok || status.message !== message || Date.now() - status.at > 5 * 60 * 1000) {
+    await api.storage.local.set({ status: { ok, message, at: Date.now() } });
+  }
   await api.action.setBadgeText({ text: ok ? '' : '!' });
   if (!ok) await api.action.setBadgeBackgroundColor({ color: '#b40000' });
 }
 
-// One full sync. A change made while a sync is running triggers one more
-// round straight after, rather than two syncs at once.
-async function sync() {
+// One sync. A cheap check asks the helper whether this browser is already
+// up to date and nothing changed here; only when that is not so is the whole
+// bookmark tree read and exchanged. A change made while a sync is running
+// triggers one more round straight after, rather than two at once.
+async function sync(force = false) {
   if (running) {
     again = true;
     return;
   }
+  if (!force && Date.now() < pausedUntil) return;
   running = true;
   try {
+    let full = force;
     do {
       again = false;
+      const { dirty } = await api.storage.local.get('dirty');
+      const needFull = full || dirty !== false;
+      full = false;
+      if (!needFull) {
+        const quick = await callHost({ type: 'check', browser: BROWSER });
+        await setPollMinutes(quick.pollMinutes);
+        if (quick.current) {
+          await setStatus(true, 'Up to date');
+          continue;
+        }
+      }
+
+      // Changes from here on mark the browser as changed again.
+      dirtyStored = false;
+      await api.storage.local.set({ dirty: false });
       const first = await callHost({ type: 'sync', ...payload(await snapshot()) });
       await setPollMinutes(first.pollMinutes);
       if (first.unchanged) {
+        stuckCount = 0;
         await setStatus(true, 'Up to date');
         continue;
       }
@@ -361,12 +421,32 @@ async function sync() {
       applying = true;
       let stats;
       try {
-        stats = await apply(target);
+        stats = await apply(target, first.mirror);
       } finally {
         applying = false;
       }
-      await callHost({ type: 'ack', ...payload(await snapshot()), stats, revision: first.revision });
-      await setStatus(true, `Synced, ${stats.created} added, ${stats.deleted} removed, ${stats.moved} moved`);
+      // A sync that stopped early is reported as not applied, so the next
+      // check carries on.
+      await callHost({ type: 'ack', ...payload(await snapshot()), stats, revision: stats.capped ? 0 : first.revision });
+      const parts = [`${stats.created} added`, `${stats.deleted} removed`, `${stats.moved} moved`];
+      if (stats.renamed) parts.push(`${stats.renamed} renamed`);
+      await setStatus(true, `Synced, ${parts.join(', ')}${stats.capped ? ', more to do' : ''}`);
+
+      if (stats.capped) {
+        stuckCount = 0;
+        setTimeout(() => sync(true), 5000);
+      } else {
+        // The same changes again and again mean this browser cannot match.
+        const signature = `${stats.created}/${stats.deleted}/${stats.moved}/${stats.errors}`;
+        stuckCount = signature === lastSignature && signature !== '0/0/0/0' ? stuckCount + 1 : 0;
+        lastSignature = signature;
+        if (stuckCount >= STUCK_LIMIT) {
+          pausedUntil = Date.now() + PAUSE_MS;
+          stuckCount = 0;
+          await setStatus(false, 'This browser keeps changing back, so syncing is paused for 15 minutes. Check for pages or folders the other browsers cannot hold.');
+          break;
+        }
+      }
     } while (again);
   } catch (err) {
     await setStatus(false, describeError(err));
@@ -377,14 +457,18 @@ async function sync() {
 
 // Waits a few seconds after a change so a burst of edits syncs once. Our
 // own changes while applying the master list are ignored.
-function scheduleSync() {
+function onBookmarkChange() {
   if (applying) return;
+  if (!dirtyStored) {
+    dirtyStored = true;
+    api.storage.local.set({ dirty: true });
+  }
   clearTimeout(timer);
   timer = setTimeout(sync, CHANGE_DELAY_MS);
 }
 
 for (const event of ['onCreated', 'onRemoved', 'onChanged', 'onMoved', 'onImportEnded']) {
-  api.bookmarks[event]?.addListener(scheduleSync);
+  api.bookmarks[event]?.addListener(onBookmarkChange);
 }
 
 // Sets how often this browser checks, from the helper's setting. The alarm
@@ -394,8 +478,8 @@ async function setPollMinutes(minutes) {
   const existing = await api.alarms.get('poll');
   if (!existing || existing.periodInMinutes !== wanted) {
     await api.alarms.create('poll', { periodInMinutes: wanted });
+    await api.storage.local.set({ pollMinutes: wanted });
   }
-  await api.storage.local.set({ pollMinutes: wanted });
 }
 
 // Use the last known period when the background script starts.
@@ -403,8 +487,8 @@ api.storage.local.get('pollMinutes').then((stored) => setPollMinutes(stored.poll
 api.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'poll') sync();
 });
-api.runtime.onStartup.addListener(sync);
-api.runtime.onInstalled.addListener(sync);
+api.runtime.onStartup.addListener(() => sync(true));
+api.runtime.onInstalled.addListener(() => sync(true));
 api.runtime.onMessage.addListener((message) => {
-  if (message === 'sync-now') sync();
+  if (message === 'sync-now') sync(true);
 });

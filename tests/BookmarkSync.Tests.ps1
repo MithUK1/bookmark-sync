@@ -80,7 +80,9 @@ $edge = New-TestSnapshot @((New-TestBookmark 'https://c.test' @('toolbar')))
 $result = Invoke-BrowserSync -State $state -Browser 'edge' -Snapshot $edge -Config $config
 Assert-Equal $false $result.Unchanged 'second browser needs changes'
 Assert-Equal 'https://a.test https://b.test https://c.test' (Get-MasterUrls $state) 'second browser adds, nothing removed'
-Assert-Equal 2 @(Get-ChildItem $Script:BackupDir -Filter '*-auto.json').Count 'automatic backup on each browser''s first sync'
+Assert-Equal 2 @(Get-ChildItem $Script:BackupDir -Filter '*-daily.json').Count 'a daily backup for each browser on its first sync'
+Assert-Equal 2 @(Get-ChildItem $Script:BackupDir -Filter '*-monthly.json').Count 'a monthly backup for each browser on its first sync'
+Assert-Equal 2 @(Get-ChildItem $Script:BackupDir -Filter '*-yearly.json').Count 'a yearly backup for each browser on its first sync'
 
 # Edge applies the master and reports back.
 $edgeApplied = New-TestSnapshot @($state.master.bookmarks) @($state.master.folders)
@@ -104,10 +106,10 @@ Assert-Equal 'other/Work' (@($loaded.master.folders)[0] -join '/') 'folder paths
 Assert-Equal 2 @($loaded.browsers.chrome.last).Count 'last-seen keys survive save and load'
 
 # ---- Backups and restore ----
-$name = New-Backup -State $state -Reason 'manual' -IncludeSeen -Config $config
+$name = New-Backup -State $state -Kind 'manual' -Browser 'all' -Config $config
 $html = Get-Content (Join-Path $Script:BackupDir "$name.html") -Raw
 Assert-Equal $true ($html -match 'PERSONAL_TOOLBAR_FOLDER') 'html backup marks the bookmarks bar'
-Assert-Equal $true ($html -match 'HREF="https://a.test"') 'html backup holds the bookmarks'
+Assert-Equal $true ($html -match 'HREF="https://b.test"') 'html backup holds the bookmarks'
 
 $state.master.bookmarks.Clear()
 Restore-Backup -State $state -Name $name -Config $config
@@ -116,8 +118,8 @@ Assert-Equal 'chrome,edge' (($state.pending_overwrite | Sort-Object) -join ',') 
 $listed = @(Get-BackupList | Where-Object { $_.Name -eq $name })[0]
 Assert-Equal 'Manual' $listed.Type 'backup list reads the type'
 Assert-Equal 'All browsers' $listed.Browser 'manual backup covers all browsers'
-$autoListed = @(Get-BackupList | Where-Object { $_.Type -eq 'Automatic' })
-Assert-Equal 'Chrome Edge' (($autoListed | ForEach-Object { $_.Browser } | Sort-Object) -join ' ') 'automatic backups name their browser'
+$dailyListed = @(Get-BackupList | Where-Object { $_.Type -eq 'Daily' })
+Assert-Equal 'Chrome Edge' (($dailyListed | ForEach-Object { $_.Browser } | Sort-Object) -join ' ') 'daily backups name their browser'
 $old = Join-Path $Script:BackupDir 'bookmarks-20250101-120000-auto.json'
 Set-Content -Path $old -Value '{}'
 Assert-Equal 'All browsers' (@(Get-BackupList | Where-Object { $_.Name -eq 'bookmarks-20250101-120000-auto' })[0].Browser) 'older backup names still read'
@@ -183,7 +185,7 @@ Save-SyncState $ord
 $reloaded = Read-SyncState
 Assert-Equal (Get-MasterOrder $ord 'toolbar') (Get-MasterOrder $reloaded 'toolbar') 'order survives save and load'
 Assert-Equal $ord.revision $reloaded.revision 'revision survives save and load'
-$orderBackup = New-Backup -State $reloaded -Reason 'manual' -IncludeSeen -Config $config
+$orderBackup = New-Backup -State $reloaded -Kind 'manual' -Browser 'all' -Config $config
 $reloaded.master.order.Clear()
 $before = $reloaded.revision
 Restore-Backup -State $reloaded -Name $orderBackup -Config $config
@@ -191,6 +193,83 @@ Assert-Equal 'b|//c.test,b|//d.test,b|//a.test,b|//b.test' (Get-MasterOrder $rel
 Assert-Equal ($before + 1) $reloaded.revision 'restore bumps the revision'
 
 # Marking all browsers to change after a restore.
+
+# ---- Backups before a change, and how long they are kept ----
+$bk = New-SyncState
+$bkOne = New-TestSnapshot @((New-TestBookmark 'https://a.test' @('toolbar'))) @()
+$bkTwo = New-TestSnapshot @((New-TestBookmark 'https://a.test' @('toolbar')), (New-TestBookmark 'https://z.test' @('toolbar'))) @()
+$null = Invoke-BrowserSync -State $bk -Browser 'chrome' -Snapshot $bkOne -Config $config
+$null = Invoke-BrowserSync -State $bk -Browser 'edge' -Snapshot $bkTwo -Config $config
+$before = @(Get-BackupList | Where-Object { $_.Type -eq 'Before a change' }).Count
+# Chrome gains y.test and is told to take z.test, so it is saved as it is first.
+$bkThree = New-TestSnapshot @((New-TestBookmark 'https://a.test' @('toolbar')), (New-TestBookmark 'https://y.test' @('toolbar'))) @()
+$null = Invoke-BrowserSync -State $bk -Browser 'chrome' -Snapshot $bkThree -Config $config
+Assert-Equal ($before + 1) @(Get-BackupList | Where-Object { $_.Type -eq 'Before a change' }).Count 'a browser is backed up before a sync changes it'
+$null = Invoke-BrowserSync -State $bk -Browser 'chrome' -Snapshot $bkThree -Config $config
+Assert-Equal ($before + 1) @(Get-BackupList | Where-Object { $_.Type -eq 'Before a change' }).Count 'the same content is not backed up twice'
+$chromeBackup = @(Get-BackupList | Where-Object { $_.Type -eq 'Before a change' -and $_.Browser -eq 'Chrome' })[0]
+$chromeJson = Get-Content (Join-Path $Script:BackupDir "$($chromeBackup.Name).json") -Raw | ConvertFrom-Json
+Assert-Equal 2 @($chromeJson.master.bookmarks).Count 'the backup holds that browser''s own bookmarks'
+
+foreach ($stamp in '20200101-120000000', '20200102-120000000') {
+    Set-Content -Path (Join-Path $Script:BackupDir "bookmarks-$stamp-chrome-daily.json") -Value '{}'
+}
+Set-Content -Path (Join-Path $Script:BackupDir 'bookmarks-20200101-120000000-chrome-yearly.json') -Value '{}'
+Remove-OldBackups -Config $config
+Assert-Equal 0 @(Get-ChildItem $Script:BackupDir -Filter 'bookmarks-2020*-daily.json').Count 'daily backups older than 30 days are removed'
+Assert-Equal 1 @(Get-ChildItem $Script:BackupDir -Filter 'bookmarks-2020*-yearly.json').Count 'yearly backups are kept'
+Remove-Item (Join-Path $Script:BackupDir 'bookmarks-20200101-120000000-chrome-yearly.json')
+
+# ---- Master browser ----
+$mirrorConfig = [ordered]@{}
+foreach ($key in $config.Keys) { $mirrorConfig[$key] = $config[$key] }
+$mirrorConfig.MasterBrowser = 'firefox'
+$mb = New-SyncState
+$ffSnap = New-OrderSnapshot @((New-TestBookmark 'https://a.test' @('toolbar')), (New-TestBookmark 'https://b.test' @('toolbar', 'Work'))) @(, @('toolbar', 'Work')) @(
+    (New-OrderEntry @('toolbar') @('f|Work', 'b|//a.test')),
+    (New-OrderEntry @('toolbar', 'Work') @('b|//b.test')),
+    (New-OrderEntry @('other') @()))
+$chSnap = New-OrderSnapshot @((New-TestBookmark 'https://own.test' @('toolbar'))) @() @(
+    (New-OrderEntry @('toolbar') @('b|//own.test')),
+    (New-OrderEntry @('other') @()))
+# Chrome syncs first: the master browser has not synced, so it joins normally.
+$null = Invoke-BrowserSync -State $mb -Browser 'chrome' -Snapshot $chSnap -Config $mirrorConfig
+Assert-Equal 'https://own.test' (Get-MasterUrls $mb) 'before the master browser has synced, others join normally'
+$null = Invoke-BrowserSync -State $mb -Browser 'firefox' -Snapshot $ffSnap -Config $mirrorConfig
+Assert-Equal 'https://a.test https://b.test' (Get-MasterUrls $mb) 'the master browser replaces the master list'
+$result = Invoke-BrowserSync -State $mb -Browser 'chrome' -Snapshot $chSnap -Config $mirrorConfig
+Assert-Equal $false $result.Unchanged 'a follower is told to match'
+Assert-Equal $true $result.Mirror 'a follower is told to copy titles too'
+Assert-Equal 'https://a.test https://b.test' (Get-MasterUrls $mb) 'a follower''s own bookmarks are not added'
+
+# A move between folders in the master browser, and a rename, reach the master.
+$ffMoved = New-OrderSnapshot @((New-TestBookmark 'https://a.test' @('toolbar', 'Work') 'Renamed'), (New-TestBookmark 'https://b.test' @('toolbar', 'Work'))) @(, @('toolbar', 'Work')) @(
+    (New-OrderEntry @('toolbar') @('f|Work')),
+    (New-OrderEntry @('toolbar', 'Work') @('b|//b.test', 'b|//a.test')),
+    (New-OrderEntry @('other') @()))
+$null = Invoke-BrowserSync -State $mb -Browser 'firefox' -Snapshot $ffMoved -Config $mirrorConfig
+Assert-Equal 'b|//b.test,b|//a.test' (Get-MasterOrder $mb "toolbar$($Script:PathSep)Work") 'a move between folders and the new order are copied'
+Assert-Equal 'Renamed' (@($mb.master.bookmarks | Where-Object { $_.url -eq 'https://a.test' })[0].title) 'a rename is copied'
+$cleanChrome = New-OrderSnapshot @($mb.master.bookmarks) @($mb.master.folders) $mb.master.order
+$staleTitle = New-OrderSnapshot @((New-TestBookmark 'https://a.test' @('toolbar', 'Work') 'Old'), (New-TestBookmark 'https://b.test' @('toolbar', 'Work'))) @(, @('toolbar', 'Work')) $mb.master.order
+Assert-Equal $false (Invoke-BrowserSync -State $mb -Browser 'edge' -Snapshot $staleTitle -Config $mirrorConfig).Unchanged 'a follower with an old title is told to change'
+
+# An empty list from the master browser is ignored.
+$null = Invoke-BrowserSync -State $mb -Browser 'firefox' -Snapshot (New-OrderSnapshot @() @() @()) -Config $mirrorConfig
+Assert-Equal 'https://a.test https://b.test' (Get-MasterUrls $mb) 'an empty list from the master browser is ignored'
+
+# Automatic mode follows the priority list.
+$autoConfig = [ordered]@{}
+foreach ($key in $config.Keys) { $autoConfig[$key] = $config[$key] }
+$autoConfig.MasterBrowser = 'auto'
+Assert-Equal 'firefox' (Get-MirrorSource -State $mb -Config $autoConfig -Current 'chrome') 'automatic picks the first browser in the list that has synced'
+Assert-Equal 'firefox' (Get-MirrorSource -State (New-SyncState) -Config $mirrorConfig -Current 'chrome') 'a chosen browser is the source even before it has synced'
+Assert-Equal 'chrome' (Get-MirrorSource -State (New-SyncState) -Config $autoConfig -Current 'chrome') 'automatic uses the syncing browser when none has synced'
+
+# The quick check file.
+Save-SyncState $mb
+$status = Get-Content $Script:StatusFile -Raw | ConvertFrom-Json
+Assert-Equal $mb.revision $status.revision 'the quick check file holds the revision'
 
 # ---- Escaping in the html backup ----
 $escaped = ConvertTo-BookmarkHtml @([ordered]@{ url = 'https://x.test/?a=1&b=2'; title = 'Tom & Jerry <3'; path = [string[]]@('other'); index = 0 })
