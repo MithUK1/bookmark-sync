@@ -7,7 +7,7 @@
     <RootNamespace>BookmarkSync</RootNamespace>
     <AssemblyName>BookmarkSync</AssemblyName>
     <ApplicationIcon>BookmarkSync.ico</ApplicationIcon>
-    <Version>1.0.0</Version>
+    <Version>1.0.1</Version>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <Deterministic>true</Deterministic>

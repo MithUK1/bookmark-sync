@@ -17,8 +17,8 @@ const BASE = `<style>*{box-sizing:border-box}body{margin:0;font-family:Inter,sys
 const mock = (status) => `
   const store = { status: ${JSON.stringify(status)} };
   globalThis.chrome = {
-    runtime: { getManifest: () => ({ version: '1.0.0' }), getURL: (p) => p,
-      sendMessage: async () => {}, sendNativeMessage: async () => ({ version: '1.0.0' }) },
+    runtime: { getManifest: () => ({ version: '1.0.1' }), getURL: (p) => p,
+      sendMessage: async () => {}, sendNativeMessage: async () => ({ version: '1.0.1' }) },
     storage: { local: { get: async (k) => ({ status: store.status }) }, onChanged: { addListener() {} } },
   };`;
 
