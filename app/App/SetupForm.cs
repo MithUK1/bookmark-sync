@@ -20,7 +20,7 @@ namespace BookmarkSync
         public SetupForm()
         {
             Text = Env.AppTitle + " - Set up browsers";
-            ClientSize = new Size(500, 400);
+            ClientSize = new Size(500, 450);
             StartPosition = FormStartPosition.CenterParent;
             Theme.Chrome(this);
 
@@ -40,18 +40,18 @@ namespace BookmarkSync
                 16, 246, 468, 130));
 
             message.AutoSize = false;
-            message.Location = new Point(16, 330);
+            message.Location = new Point(16, 380);
             message.Size = new Size(468, 20);
             Controls.Add(message);
 
-            var folder = Theme.Button("Open folder", 16, 356, 110);
+            var folder = Theme.Button("Open folder", 16, 404, 110);
             folder.Click += (s, e) =>
             {
                 Directory.CreateDirectory(Env.DataDir);
                 Process.Start("explorer.exe", "\"" + Env.DataDir + "\"");
             };
             Controls.Add(folder);
-            var close = Theme.Button("Close", 394, 356);
+            var close = Theme.Button("Close", 394, 404);
             close.DialogResult = DialogResult.Cancel;
             Controls.Add(close);
             CancelButton = close;
@@ -60,10 +60,13 @@ namespace BookmarkSync
         private void AddRow(string id, string name, string appPath, string flavour, string page, int y, State state)
         {
             Controls.Add(new Label { Text = name, AutoSize = true, Location = new Point(16, y + 6), Font = Theme.UiFontBold });
-            bool working = state != null && state.Browsers.ContainsKey(id);
+            BrowserEntry seen;
+            // Only counts as syncing if the extension has reported in recently (the entry stays in the state after an add-on is removed).
+            bool working = state != null && state.Browsers.TryGetValue(id, out seen) && seen != null && Env.UnixTime() - seen.Seen < 24 * 3600;
+            bool wasSeen = state != null && state.Browsers.ContainsKey(id);
             Controls.Add(new Label
             {
-                Text = working ? "Syncing" : "Not set up yet",
+                Text = working ? "Syncing" : (wasSeen ? "Not seen recently" : "Not set up yet"),
                 AutoSize = true,
                 Location = new Point(110, y + 6),
                 ForeColor = working ? Theme.OkFg : Theme.Muted
