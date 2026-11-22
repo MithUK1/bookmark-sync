@@ -36,6 +36,31 @@ document.getElementById('open').addEventListener('click', async () => {
   }
 });
 
-document.getElementById('version').textContent = `v${api.runtime.getManifest().version} - MUK1`;
+// "v0.5.0 - 1a2b3c4d": the version and the first 8 characters of a checksum of this extension's script.
+async function showVersion() {
+  const version = api.runtime.getManifest().version;
+  let label = `v${version}`;
+  try {
+    const bytes = await (await fetch(api.runtime.getURL('background.js'))).arrayBuffer();
+    const hash = await crypto.subtle.digest('SHA-256', bytes);
+    label += ` - ${[...new Uint8Array(hash)].slice(0, 4).map((b) => b.toString(16).padStart(2, '0')).join('')}`;
+  } catch {
+    // The label is cosmetic; the version alone is enough.
+  }
+  document.getElementById('version').textContent = label;
+
+  // The extension and the program share one version number; say so when they differ.
+  try {
+    const reply = await api.runtime.sendNativeMessage(HOST, { type: 'status' });
+    if (reply?.version && reply.version !== version) {
+      const box = document.getElementById('mismatch');
+      box.textContent = `The program is v${reply.version} but this extension is v${version}. Reload the extension on the browser's extensions page.`;
+      box.hidden = false;
+    }
+  } catch {
+    // Not installed: the Open button already explains that.
+  }
+}
+showVersion();
 api.storage.onChanged.addListener(render);
 render();

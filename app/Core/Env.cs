@@ -10,7 +10,7 @@ namespace BookmarkSync
     public static class Env
     {
         public const string AppTitle = "Bookmark Sync";
-        public const string AppVersion = "0.5.0";
+        public const string AppVersion = "0.5.1";
         public const string HostName = "com.muk1.bookmarksync";
         public const string ChromiumExtensionId = "kmajebfppgghbdedpfacpckkimnclejj";
         public const string FirefoxExtensionId = "bookmark-sync@muk1";
