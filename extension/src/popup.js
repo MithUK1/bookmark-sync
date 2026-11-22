@@ -36,6 +36,23 @@ document.getElementById('open').addEventListener('click', async () => {
   }
 });
 
+// The ? button shows what each part of this window does.
+document.getElementById('helpButton').addEventListener('click', () => {
+  const box = document.getElementById('helpText');
+  if (!box.hidden) {
+    box.hidden = true;
+    return;
+  }
+  box.replaceChildren(...HELP.map(([term, text]) => {
+    const row = document.createElement('p');
+    const bold = document.createElement('strong');
+    bold.textContent = `${term}: `;
+    row.append(bold, text);
+    return row;
+  }));
+  box.hidden = false;
+});
+
 // "v0.5.0 - 1a2b3c4d": the version and the first 8 characters of a checksum of this extension's script.
 async function showVersion() {
   const version = api.runtime.getManifest().version;

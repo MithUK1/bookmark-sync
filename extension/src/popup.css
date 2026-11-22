@@ -42,8 +42,23 @@ main {
 }
 
 h1 {
-  margin: 0 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
   font-size: 14px;
+}
+
+h1 img {
+  width: 20px;
+  height: 20px;
+}
+
+h1 a {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: normal;
+  color: var(--accent);
 }
 
 .status {
@@ -75,6 +90,29 @@ button {
 
 button:hover {
   background: var(--bg);
+}
+
+button.help {
+  display: inline-block;
+  width: 22px;
+  height: 22px;
+  margin: 0 0 0 -2px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.help-text {
+  margin: 0 0 10px;
+  padding: 6px 10px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.help-text p {
+  margin: 6px 0;
 }
 
 button.primary {

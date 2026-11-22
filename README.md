@@ -27,7 +27,7 @@ Firefox: News                  Firefox: Recipes, News, Weather
 ## Install
 
 - Windows 10 or 11 (uses the .NET Framework 4.8 that comes with Windows).
-- [Google Chrome](https://www.google.com/chrome/), [Microsoft Edge](https://www.microsoft.com/edge) and/or [Firefox](https://www.mozilla.org/firefox/) 115 or newer.
+- [Google Chrome](https://www.google.com/chrome/), [Microsoft Edge](https://www.microsoft.com/edge) and/or [Firefox](https://www.mozilla.org/firefox/) 140 or newer.
 
 1. Run `BookmarkSync.exe` from the Bookmark Sync folder (or build it first, see Build from source). It installs itself for your user, no admin rights, registers the helper with each browser, adds a **Bookmark Sync** shortcut to the Desktop, the Start menu and the folder you ran it from (the Desktop and Start menu open the installed app, the folder one opens that copy so a newer download upgrades when you use it), starts with Windows, and opens the window.
 2. Click **Set up browsers** in the window. It keeps the extension files up to date in its own folder, opens each browser's extensions page and copies the folder path:
@@ -38,7 +38,7 @@ Firefox: News                  Firefox: Recipes, News, Weather
 
 ## Using it
 
-Each browser syncs a few seconds after a bookmark change, when it starts, and whenever the program tells it another browser changed. A slow check every 10 minutes catches anything missed. The toolbar button shows the last sync, has **Sync now**, and opens the Bookmark Sync window.
+Each browser syncs a few seconds after a bookmark change, when it starts, and whenever the program tells it another browser changed. A slow check every 10 minutes catches anything missed. The toolbar button shows the last sync, has **Sync now**, opens the Bookmark Sync window, and has a **Help** link (top right, opens this page) and a **?** that explains each part.
 
 ## Settings
 

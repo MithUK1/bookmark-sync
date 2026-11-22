@@ -21,6 +21,8 @@
     --accent-dark: #2b6cdf;
     --ok: #4cc38a;
     --error: #ff6b6b;
+  }
+}
 
 body {
   margin: 0;

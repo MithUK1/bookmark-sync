@@ -8,14 +8,16 @@
 <body>
   <div class="accent"></div>
   <main>
-    <h1>Bookmark Sync</h1>
+    <h1><img src="icons/icon32.png" alt=""> Bookmark Sync <button type="button" class="help" id="helpButton" aria-label="Explain this window">?</button> <a id="helpLink" href="https://github.com/MithUK1/bookmark-sync#readme" target="_blank" rel="noopener">Help</a></h1>
     <p id="status" class="status">Checking...</p>
+    <div id="helpText" class="help-text" hidden></div>
     <p id="mismatch" class="status bad" hidden></p>
     <button id="sync" class="primary" type="button">Sync now</button>
     <button id="open" type="button">Open Bookmark Sync</button>
     <p class="hint">Backups, restore and settings are in the Bookmark Sync window on this computer.</p>
   </main>
   <footer id="version"></footer>
+  <script src="help.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>
