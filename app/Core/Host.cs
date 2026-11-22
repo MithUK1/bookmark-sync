@@ -98,7 +98,15 @@ namespace BookmarkSync
             string browser = Json.Str(Json.Get(request, "browser"));
             if (!Env.IsBrowser(browser)) throw new InvalidOperationException("Unknown browser '" + browser + "'.");
 
-            if (type == "hello") return WithAsk(Reply());
+            if (type == "hello")
+            {
+                var hello = WithAsk(Reply());
+                // An older extension copy (Chrome or Edge, loaded from our folder) is told to reload
+                // so it picks up the files the upgrade wrote. Old copies that send no version are left alone.
+                string theirs = Json.Str(Json.Get(request, "version"));
+                if (!string.IsNullOrEmpty(theirs) && theirs != Env.AppVersion && browser != "firefox") hello["reload"] = true;
+                return hello;
+            }
 
             if (type == "check")
             {

@@ -159,6 +159,17 @@ let nextId = 1;
 const waiting = new Map();
 let reconnectTimer = null;
 
+// The app was upgraded and its extension folder holds a newer copy: reload from disk so the two
+// stay the same version. Once every 10 minutes at most, so a stuck copy cannot loop.
+async function reloadForUpgrade() {
+  try {
+    const { lastReload } = await api.storage.local.get('lastReload');
+    if (lastReload && Date.now() - lastReload < 10 * 60 * 1000) return;
+    await api.storage.local.set({ lastReload: Date.now() });
+    api.runtime.reload();
+  } catch (e) { /* leave it; the popup still shows the mismatch */ }
+}
+
 // Opens the connection if it is not open and says hello, so the helper
 // knows which browser this is and starts watching for changes.
 function connect() {
@@ -168,6 +179,10 @@ function connect() {
   port = opened;
   opened.onMessage.addListener((message) => {
     if (typeof message?.askDuplicates === 'boolean') askDuplicates = message.askDuplicates;
+    if (message?.reload === true) {
+      reloadForUpgrade();
+      return;
+    }
     if (message?.type === 'changed') {
       sync();
       return;
@@ -193,7 +208,7 @@ function connect() {
       sync(true);
     }, RECONNECT_MS);
   });
-  opened.postMessage({ type: 'hello', browser: BROWSER, id: 0 });
+  opened.postMessage({ type: 'hello', browser: BROWSER, id: 0, version: api.runtime.getManifest().version });
   return opened;
 }
 

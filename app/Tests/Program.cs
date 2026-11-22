@@ -262,6 +262,12 @@ namespace BookmarkSync.Tests
             File.Delete(Env.StateFile);
             var first = Host.Handle(req);
             Equal(true, Json.Bool(Json.Get(first, "ok")), "host sync answers ok");
+            var hOld = Host.Handle(new Dictionary<string, object> { { "type", "hello" }, { "browser", "chrome" }, { "version", "0.0.1" } });
+            Equal(true, hOld.ContainsKey("reload"), "an older extension is told to reload");
+            var hSame = Host.Handle(new Dictionary<string, object> { { "type", "hello" }, { "browser", "chrome" }, { "version", Env.AppVersion } });
+            Equal(false, hSame.ContainsKey("reload"), "a matching extension is left alone");
+            var hNone = Host.Handle(new Dictionary<string, object> { { "type", "hello" }, { "browser", "chrome" } });
+            Equal(false, hNone.ContainsKey("reload"), "an extension that sends no version is left alone");
             var req2 = new Dictionary<string, object> { { "type", "sync" }, { "browser", "edge" }, { "bookmarks", new List<object>() }, { "folders", new List<object>() }, { "order", new List<object>() } };
             var second = Host.Handle(req2);
             Equal(false, Json.Bool(Json.Get(second, "unchanged")), "a second browser is sent the master list");
