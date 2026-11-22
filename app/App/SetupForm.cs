@@ -20,7 +20,7 @@ namespace BookmarkSync
         public SetupForm()
         {
             Text = Env.AppTitle + " - Set up browsers";
-            ClientSize = new Size(500, 450);
+            ClientSize = new Size(500, 470);
             StartPosition = FormStartPosition.CenterParent;
             Theme.Chrome(this);
 
@@ -40,18 +40,18 @@ namespace BookmarkSync
                 16, 246, 468, 130));
 
             message.AutoSize = false;
-            message.Location = new Point(16, 380);
+            message.Location = new Point(16, 372);
             message.Size = new Size(468, 20);
             Controls.Add(message);
 
-            var folder = Theme.Button("Open folder", 16, 404, 110);
+            var folder = Theme.Button("Open folder", 16, 398, 110);
             folder.Click += (s, e) =>
             {
                 Directory.CreateDirectory(Env.DataDir);
                 Process.Start("explorer.exe", "\"" + Env.DataDir + "\"");
             };
             Controls.Add(folder);
-            var close = Theme.Button("Close", 394, 404);
+            var close = Theme.Button("Close", 374, 398);
             close.DialogResult = DialogResult.Cancel;
             Controls.Add(close);
             CancelButton = close;
