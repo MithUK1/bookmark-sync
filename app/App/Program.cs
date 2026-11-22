@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows.Forms;
 
@@ -9,6 +10,22 @@ namespace BookmarkSync
     /// its extension address or the helper description file), --show and --tray for the window and
     /// tray icon, and --uninstall.
     /// </summary>
+    /// <summary>The few Windows calls that let a second start bring the running window to the front.</summary>
+    internal static class Native
+    {
+        /// <summary>Lets any process take the foreground, so the window shown by the running copy is not left behind.</summary>
+        public static void AllowAnyForeground()
+        {
+            AllowSetForegroundWindow(-1);
+        }
+
+        [DllImport("user32.dll")]
+        private static extern bool AllowSetForegroundWindow(int processId);
+
+        [DllImport("user32.dll")]
+        public static extern bool SetForegroundWindow(IntPtr handle);
+    }
+
     public static class Program
     {
         [STAThread]
@@ -76,6 +93,7 @@ namespace BookmarkSync
                     // Already running: ask it to show its window.
                     try
                     {
+                        Native.AllowAnyForeground();
                         using (EventWaitHandle show = EventWaitHandle.OpenExisting("BookmarkSyncShow")) show.Set();
                     }
                     catch (WaitHandleCannotBeOpenedException)

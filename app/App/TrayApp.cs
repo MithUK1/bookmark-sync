@@ -85,7 +85,11 @@ namespace BookmarkSync
             if (window == null || window.IsDisposed) window = new MainForm(this);
             window.Show();
             if (window.WindowState == FormWindowState.Minimized) window.WindowState = FormWindowState.Normal;
+            // A window shown by a request from another process can stay behind, so bring it forward every time.
+            window.TopMost = true;
             window.Activate();
+            Native.SetForegroundWindow(window.Handle);
+            window.TopMost = false;
         }
 
         public void ExitApp()

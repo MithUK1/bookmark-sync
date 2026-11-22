@@ -148,6 +148,8 @@ namespace BookmarkSync
 
         private static void StartInstalled(string argument)
         {
+            // The installed copy shows its window, so it may take the foreground.
+            Native.AllowAnyForeground();
             Process.Start(new ProcessStartInfo(Env.InstalledExe, argument) { UseShellExecute = false });
         }
 
