@@ -10,7 +10,7 @@ namespace BookmarkSync
     public static class Env
     {
         public const string AppTitle = "Bookmark Sync";
-        public const string AppVersion = "0.7.0";
+        public const string AppVersion = "1.0.0";
         /// <summary>The README on GitHub, which is the help for every setting.</summary>
         public const string HelpUrl = "https://github.com/MithUK1/bookmark-sync#readme";
         public const string HostName = "com.muk1.bookmarksync";
