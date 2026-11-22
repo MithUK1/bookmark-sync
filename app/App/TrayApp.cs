@@ -34,10 +34,14 @@ namespace BookmarkSync
         private MainForm window;
         private string lastBackupDay = DateTime.Now.ToString("yyyyMMdd");
 
+        /// <summary>The running instance, so the Settings window can ask it to exit.</summary>
+        public static TrayApp Current { get; private set; }
+
         public bool Exiting { get; private set; }
 
         public TrayApp(bool showWindow)
         {
+            Current = this;
             marshal.CreateControl();
             IntPtr force = marshal.Handle;
 

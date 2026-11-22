@@ -68,6 +68,7 @@ namespace BookmarkSync
             settings.Click += (s, e) =>
             {
                 using (var form = new SettingsForm()) form.ShowDialog(this);
+                ApplyTraySetting(Config.Load());
                 RefreshAll();
             };
             Controls.Add(settings);
@@ -101,6 +102,7 @@ namespace BookmarkSync
             FormClosing += OnClosing;
 
             Config config = Config.Load();
+            ApplyTraySetting(config);
             if (config.WindowLeft >= 0)
             {
                 var spot = new Point(config.WindowLeft, config.WindowTop);
@@ -127,12 +129,25 @@ namespace BookmarkSync
             {
                 Env.Log("Window position not saved: " + ex.Message);
             }
-            // Closing the window leaves the program running in the tray.
-            if (e.CloseReason == CloseReason.UserClosing && !app.Exiting)
+            if (e.CloseReason != CloseReason.UserClosing || app.Exiting) return;
+            if (Config.Load().MinimiseToTray)
             {
+                // Closing the window leaves the program running in the tray.
                 e.Cancel = true;
                 Hide();
             }
+            else
+            {
+                // Without the tray option the close button exits.
+                e.Cancel = true;
+                app.ExitApp();
+            }
+        }
+
+        /// <summary>With the tray option on there is no minimise button, and the close button hides to the tray.</summary>
+        private void ApplyTraySetting(Config config)
+        {
+            MinimizeBox = !config.MinimiseToTray;
         }
 
         public void SetStatus(string text, Color color)

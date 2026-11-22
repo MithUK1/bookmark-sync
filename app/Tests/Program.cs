@@ -281,6 +281,8 @@ namespace BookmarkSync.Tests
             catch (InvalidOperationException) { passes++; }
 
             // ---- Settings ----
+            Equal(true, new Config().MinimiseToTray, "minimise to tray is on by default");
+            Equal(true, new Config().StartWithWindows, "start with Windows is on by default");
             File.Delete(Env.ConfigFile);
             var hello = Host.Handle(new Dictionary<string, object> { { "type", "hello" }, { "browser", "chrome" } });
             Equal(true, (bool)hello["askDuplicates"], "browsers ask about duplicates by default");

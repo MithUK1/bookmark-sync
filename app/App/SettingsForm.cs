@@ -24,6 +24,7 @@ namespace BookmarkSync
         private readonly Config original;
         private readonly CheckBox dedupe = new CheckBox();
         private readonly CheckBox startup = new CheckBox();
+        private readonly CheckBox tray = new CheckBox();
         private readonly CheckBox ask = new CheckBox();
         private readonly ComboBox master = new ComboBox();
         private readonly NumericUpDown keep = new NumericUpDown();
@@ -67,45 +68,57 @@ namespace BookmarkSync
             Controls.Add(new Label { Text = "backups made before changes, per browser", AutoSize = true, Location = new Point(174, 232) });
             Controls.Add(Theme.SmallPrint("Each browser also keeps 7 daily, 4 weekly, 12 monthly and 5 yearly backups. Ones you make are always kept.", 16, 258, 400));
 
-            Controls.Add(Theme.Heading("Start", 16, 304));
+            Controls.Add(Theme.Heading("App", 16, 304));
             startup.Text = "Start with Windows";
             startup.AutoSize = true;
             startup.Location = new Point(16, 328);
             startup.Checked = config.StartWithWindows;
             Controls.Add(startup);
-            Controls.Add(Theme.SmallPrint("Runs in the tray so browsers are told the moment another one changes.", 34, 352, 390));
+            tray.Text = "Minimise to tray";
+            tray.AutoSize = true;
+            tray.Location = new Point(16, 352);
+            tray.Checked = config.MinimiseToTray;
+            Controls.Add(tray);
+            Controls.Add(Theme.SmallPrint("On: the close button hides the window to the tray (no minimise button). Off: both buttons show and close exits. The tray icon's right-click menu and Exit app below always stop it.", 34, 376, 390, 44));
+            var exitApp = Theme.Button("Exit app", 332, 328, 92);
+            exitApp.Click += (s, e) =>
+            {
+                if (TrayApp.Current != null) TrayApp.Current.ExitApp();
+            };
+            Controls.Add(exitApp);
 
-            Controls.Add(Theme.Heading("Help and files", 16, 388));
-            var help = Theme.Button("Help", 16, 414, 90);
-            help.Click += (s, e) => new HelpForm().ShowDialog(this);
+            // Help comes first at the bottom left, then the files, then Reset.
+            var help = Theme.Button("Help", 16, 440, 70);
+            help.Click += (s, e) => Process.Start(new ProcessStartInfo(Env.HelpUrl) { UseShellExecute = true });
             Controls.Add(help);
-            var openSettings = Theme.Button("Open settings file", 114, 414, 140);
+            var openSettings = Theme.Button("Open settings file", 94, 440, 130);
             openSettings.Click += (s, e) =>
             {
                 if (!File.Exists(Env.ConfigFile)) config.Save();
                 Process.Start("notepad.exe", "\"" + Env.ConfigFile + "\"");
             };
             Controls.Add(openSettings);
-            var openLog = Theme.Button("Open log", 262, 414, 90);
+            var openLog = Theme.Button("Open log", 232, 440, 90);
             openLog.Click += (s, e) => { if (File.Exists(Env.LogPath)) Process.Start("notepad.exe", "\"" + Env.LogPath + "\""); };
             Controls.Add(openLog);
 
-            var defaults = Theme.Button("Restore defaults", 16, 460, 140);
+            var defaults = Theme.Button("Reset", 330, 440, 94);
             defaults.Click += (s, e) =>
             {
-                if (!Theme.Confirm("Put every setting back to its default? Bookmarks and backups are not touched.", "Restore defaults")) return;
+                if (!Theme.Confirm("Put every setting back to its default? Bookmarks and backups are not touched.", "Reset")) return;
                 var d = new Config();
                 dedupe.Checked = d.RemoveDuplicates;
                 ask.Checked = d.AskAboutDuplicates;
                 startup.Checked = d.StartWithWindows;
+                tray.Checked = d.MinimiseToTray;
                 keep.Value = d.AutoBackupsToKeep;
                 master.SelectedIndex = 0;
             };
             Controls.Add(defaults);
-            var remove = Theme.Button("Remove all app data", 164, 460, 160, warning: true);
+            var remove = Theme.Button("Remove all app data", 16, 486, 160, warning: true);
             remove.Click += (s, e) => RemoveEverything();
             Controls.Add(remove);
-            var repair = Theme.Button("Repair install", 332, 460, 92);
+            var repair = Theme.Button("Repair install", 184, 486, 110);
             repair.Click += (s, e) =>
             {
                 try
@@ -127,7 +140,7 @@ namespace BookmarkSync
             {
                 if (control.Top >= 100) control.Top += 56;
             }
-            ClientSize = new Size(440, 616);
+            ClientSize = new Size(440, 640);
             ask.Text = "Ask before a new duplicate stays";
             ask.AutoSize = true;
             ask.Location = new Point(16, 104);
@@ -135,11 +148,11 @@ namespace BookmarkSync
             Controls.Add(ask);
             Controls.Add(Theme.SmallPrint("When you add a bookmark that already exists, the browser shows where the other one is and lets you keep or remove it. Kept duplicates sync to the other browsers.", 34, 128, 390, 44));
 
-            var save = Theme.Button("Save", 16, 512, 90, primary: true);
+            var save = Theme.Button("Save", 16, 592, 90, primary: true);
             save.Click += (s, e) => SaveAndClose();
             Controls.Add(save);
             AcceptButton = save;
-            var close = Theme.Button("Close", 314, 512);
+            var close = Theme.Button("Close", 314, 592);
             close.DialogResult = DialogResult.Cancel;
             Controls.Add(close);
             CancelButton = close;
@@ -149,6 +162,7 @@ namespace BookmarkSync
         {
             config.RemoveDuplicates = dedupe.Checked;
             config.StartWithWindows = startup.Checked;
+            config.MinimiseToTray = tray.Checked;
             config.AskAboutDuplicates = ask.Checked;
             config.AutoBackupsToKeep = (int)keep.Value;
             config.MasterBrowser = MasterChoices[master.SelectedIndex][0];

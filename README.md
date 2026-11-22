@@ -22,7 +22,7 @@ Firefox: News                  Firefox: Recipes, News, Weather
 - **Master browser** (Settings, optional): pick one browser, or Automatic (Firefox, then Chrome, then Edge), and the others copy it exactly: its adds, deletes, moves between folders, renames and order. Anything changed in the other browsers is put back. An empty list from the master browser is ignored.
 - Never touches browser pages such as `chrome://` or `about:`.
 - Watches for changes instead of using a timer: each browser holds a connection to the program, and is told the moment another browser changes.
-- Runs from the tray: right-click the icon to open the window, see each browser's state, pick the master browser, back up now, turn Start with Windows on or off, or exit. Closing the window leaves it in the tray.
+- Runs from the tray: right-click the icon to open the window, see each browser's state, pick the master browser, back up now, turn Start with Windows on or off, or exit. Closing the window leaves it in the tray (Settings > Minimise to tray; turn it off and close exits). **Exit app** in Settings and Exit in the tray menu stop it. **Help** in Settings opens this page.
 
 ## Install
 
@@ -54,6 +54,7 @@ Settings are in the window under **Settings**, and in `%LOCALAPPDATA%\BookmarkSy
 | `MonthlyToKeep` | `12` | Monthly backups to keep per browser. |
 | `YearliesToKeep` | `5` | Yearly backups to keep per browser. |
 | `StartWithWindows` | `true` | Start in the tray when you sign in. |
+| `MinimiseToTray` | `true` | On: the close button hides the window to the tray and there is no minimise button. Off: both buttons show and close exits. |
 | `MasterBrowser` | `off` | `off`, `auto`, `firefox`, `chrome` or `edge`. The browser the others copy. |
 | `BrowserPriority` | `firefox,chrome,edge` | Order used when `MasterBrowser` is `auto`. |
 | `WindowLeft`, `WindowTop` | `-1` | Where the window was last placed. `-1` centres it. |

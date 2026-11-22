@@ -19,6 +19,8 @@ namespace BookmarkSync
         public string MasterBrowser = "off";
         public string BrowserPriority = "firefox,chrome,edge";
         public bool StartWithWindows = true;
+        /// <summary>On: the close button hides the window to the tray and there is no minimise button. Off: both buttons show and close exits.</summary>
+        public bool MinimiseToTray = true;
         public int WindowLeft = -1;
         public int WindowTop = -1;
 
@@ -48,6 +50,7 @@ namespace BookmarkSync
                 config.MasterBrowser = Json.Str(Json.Get(root, "MasterBrowser"), config.MasterBrowser).Trim().ToLowerInvariant();
                 config.BrowserPriority = Json.Str(Json.Get(root, "BrowserPriority"), config.BrowserPriority).Trim().ToLowerInvariant();
                 config.StartWithWindows = Json.Bool(Json.Get(root, "StartWithWindows"), config.StartWithWindows);
+                config.MinimiseToTray = Json.Bool(Json.Get(root, "MinimiseToTray"), config.MinimiseToTray);
                 config.WindowLeft = Json.Int(Json.Get(root, "WindowLeft"), config.WindowLeft);
                 config.WindowTop = Json.Int(Json.Get(root, "WindowTop"), config.WindowTop);
             }
@@ -84,6 +87,7 @@ namespace BookmarkSync
             d["MasterBrowser"] = MasterBrowser;
             d["BrowserPriority"] = BrowserPriority;
             d["StartWithWindows"] = StartWithWindows;
+            d["MinimiseToTray"] = MinimiseToTray;
             d["WindowLeft"] = WindowLeft;
             d["WindowTop"] = WindowTop;
             Env.WriteFileSafely(Env.ConfigFile, Json.Write(d));
