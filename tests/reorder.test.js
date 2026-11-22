@@ -28,7 +28,7 @@ const api={bookmarks:{
 api.runtime.getBrowserInfo=async()=>({});
 const ctx={chrome:api,...(firefox?{browser:api}:{}),navigator:{userAgent:'Chrome'},URL,atob,TextDecoder,console,setTimeout,clearTimeout};
 ctx.globalThis=ctx;vm.createContext(ctx);
-vm.runInContext(fs.readFileSync(require('path').join(__dirname,'..','src','background.js'),'utf8')+';this.apply=apply;this.snapshot=snapshot',ctx);
+vm.runInContext(fs.readFileSync(require('path').join(__dirname,'..','extension','src','background.js'),'utf8')+';this.apply=apply;this.snapshot=snapshot',ctx);
 const shuffled=Array.from({length:40},(_,i)=>'b|//g'+i+'.test');
 let seed=7;const rnd=()=>(seed=(seed*16807)%2147483647)/2147483647;
 for(let i=shuffled.length-1;i>0;i--){const j=Math.floor(rnd()*(i+1));[shuffled[i],shuffled[j]]=[shuffled[j],shuffled[i]];}

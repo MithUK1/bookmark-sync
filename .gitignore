@@ -1,7 +1,11 @@
-dist/
 *.pem
 *.tmp
 *.lnk
+BookmarkSync.exe
+Backups/
+extension/chrome/
+extension/firefox/
+extension/*.zip
 app/bin/
 app/obj/
 app/Tests/bin/

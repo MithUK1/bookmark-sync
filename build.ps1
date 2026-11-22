@@ -1,26 +1,27 @@
 <#
 .SYNOPSIS
-    Builds the Bookmark Sync program and the extension for each browser into dist\.
+    Builds the Bookmark Sync program and the extension for each browser.
 
 .DESCRIPTION
-    Copies src\ with the matching manifest into dist\chromium (Chrome and
-    Edge) and dist\firefox, and zips each one. Stops if the version in the
-    two manifests and the program source do not all match. When the .NET SDK
-    is installed it also builds dist\BookmarkSync.exe.
+    Copies extension\src\ with the matching manifest into extension\chrome
+    (Chrome and Edge) and extension\firefox, and zips each one next to them.
+    Stops if the version in the two manifests and the program source do not
+    all match. When the .NET SDK is installed it also builds BookmarkSync.exe
+    in the top folder.
 #>
 
 #Requires -Version 5.1
 
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
-$dist = Join-Path $root 'dist'
+$ext = Join-Path $root 'extension'
 
 # Reads the version from each place it is kept and checks they agree.
 function Get-CheckedVersion {
     $versions = @{}
     foreach ($name in 'chrome', 'firefox') {
-        $manifest = Get-Content -Path (Join-Path $root "manifests\$name.json") -Raw | ConvertFrom-Json
-        $versions["manifests\$name.json"] = $manifest.version
+        $manifest = Get-Content -Path (Join-Path $root "extension\manifests\$name.json") -Raw | ConvertFrom-Json
+        $versions["extension\manifests\$name.json"] = $manifest.version
     }
     $match = Select-String -Path (Join-Path $root 'app\Core\Env.cs') -Pattern 'AppVersion = "([0-9.]+)"' | Select-Object -First 1
     $versions['app\Core\Env.cs'] = $match.Matches[0].Groups[1].Value
@@ -37,28 +38,28 @@ function Get-CheckedVersion {
 # then zips it.
 function New-BrowserBuild {
     param([string]$Manifest, [string]$Folder, [string]$Version)
-    $target = Join-Path $dist $Folder
+    $target = Join-Path $ext $Folder
     if (Test-Path $target) { Remove-Item -Path $target -Recurse -Force }
     New-Item -Path $target -ItemType Directory | Out-Null
-    Copy-Item -Path (Join-Path $root 'src\*') -Destination $target -Recurse
-    Copy-Item -Path (Join-Path $root "manifests\$Manifest.json") -Destination (Join-Path $target 'manifest.json')
+    Copy-Item -Path (Join-Path $ext 'src\*') -Destination $target -Recurse
+    Copy-Item -Path (Join-Path $ext "manifests\$Manifest.json") -Destination (Join-Path $target 'manifest.json')
 
-    $zip = Join-Path $dist "bookmark-sync-$Folder-$Version.zip"
+    $zip = Join-Path $ext "bookmark-sync-$Folder-$Version.zip"
     if (Test-Path $zip) { Remove-Item -Path $zip -Force }
     Compress-Archive -Path (Join-Path $target '*') -DestinationPath $zip
     Write-Host "Built $zip"
 }
 
 $version = Get-CheckedVersion
-New-BrowserBuild -Manifest 'chrome' -Folder 'chromium' -Version $version
+New-BrowserBuild -Manifest 'chrome' -Folder 'chrome' -Version $version
 New-BrowserBuild -Manifest 'firefox' -Folder 'firefox' -Version $version
 
 # The program: one exe built from app\BookmarkSync.csproj.
 if (Get-Command dotnet -ErrorAction SilentlyContinue) {
     & dotnet build (Join-Path $root 'app\BookmarkSync.csproj') -c Release --nologo -v q
     if ($LASTEXITCODE -ne 0) { throw 'The program did not build.' }
-    Copy-Item -Path (Join-Path $root 'app\bin\Release\net48\BookmarkSync.exe') -Destination (Join-Path $dist 'BookmarkSync.exe') -Force
-    Write-Host "Built $(Join-Path $dist 'BookmarkSync.exe')"
+    Copy-Item -Path (Join-Path $root 'app\bin\Release\net48\BookmarkSync.exe') -Destination (Join-Path $root 'BookmarkSync.exe') -Force
+    Write-Host "Built $(Join-Path $root 'BookmarkSync.exe')"
 }
 else {
     Write-Host 'The .NET SDK is not installed, so BookmarkSync.exe was not built.'

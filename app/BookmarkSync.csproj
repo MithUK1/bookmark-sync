@@ -15,8 +15,8 @@
   <ItemGroup>
     <Compile Include="Core\*.cs" />
     <Compile Include="App\*.cs" />
-    <EmbeddedResource Include="..\src\**\*" LogicalName="ext/%(RecursiveDir)%(Filename)%(Extension)" />
-    <EmbeddedResource Include="..\manifests\*.json" LogicalName="ext-manifest/%(Filename)%(Extension)" />
+    <EmbeddedResource Include="..\extension\src\**\*" LogicalName="ext/%(RecursiveDir)%(Filename)%(Extension)" />
+    <EmbeddedResource Include="..\extension\manifests\*.json" LogicalName="ext-manifest/%(Filename)%(Extension)" />
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Drawing" />
     <Reference Include="Microsoft.CSharp" />

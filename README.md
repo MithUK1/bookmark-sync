@@ -24,24 +24,23 @@ Firefox: News                  Firefox: Recipes, News, Weather
 - Watches for changes instead of using a timer: each browser holds a connection to the program, and is told the moment another browser changes.
 - Runs from the tray: right-click the icon to open the window, see each browser's state, pick the master browser, back up now, turn Start with Windows on or off, or exit. Closing the window leaves it in the tray.
 
-## Requirements
+## Install
 
 - Windows 10 or 11 (uses the .NET Framework 4.8 that comes with Windows).
 - [Google Chrome](https://www.google.com/chrome/), [Microsoft Edge](https://www.microsoft.com/edge) and/or [Firefox](https://www.mozilla.org/firefox/) 115 or newer.
 
-## Install
-
-1. Build the program and extension: run `build.ps1` (needs the .NET SDK for the program). It writes `dist\BookmarkSync.exe`, `dist\chromium` and `dist\firefox`.
-2. Run `BookmarkSync.exe`. It installs itself for your user, no admin rights, registers the helper with each browser, adds a **Bookmark Sync** shortcut to the Desktop, the Start menu and the folder you ran it from (the Desktop and Start menu open the installed app, the folder one opens that copy so a newer download upgrades when you use it), starts with Windows, and opens the window.
-3. Click **Set up browsers** in the window. It keeps the extension files up to date in its own folder, opens each browser's extensions page and copies the folder path:
+1. Run `BookmarkSync.exe` from the Bookmark Sync folder (or build it first, see Build from source). It installs itself for your user, no admin rights, registers the helper with each browser, adds a **Bookmark Sync** shortcut to the Desktop, the Start menu and the folder you ran it from (the Desktop and Start menu open the installed app, the folder one opens that copy so a newer download upgrades when you use it), starts with Windows, and opens the window.
+2. Click **Set up browsers** in the window. It keeps the extension files up to date in its own folder, opens each browser's extensions page and copies the folder path:
    - **Chrome and Edge:** turn on Developer mode, Load unpacked, paste the path. Browsers do not let a program add an extension from outside their store, so this one click is yours. After an update, press Reload on the extension.
    - **Firefox:** sign the Firefox build as an unlisted add-on on addons.mozilla.org (free, no store listing), put the signed `.xpi` in the Bookmark Sync folder and press the Firefox button. Without a signed file, Firefox only allows a temporary add-on (about:debugging, Load Temporary Add-on, pick `manifest.json` in the copied folder), removed when Firefox restarts.
 
 **Updating:** run a newer `BookmarkSync.exe` the same way. It compares versions, changes only what differs (program file, browser registration, shortcuts, new settings) and says what it changed. Settings, bookmarks and backups are kept, and an older copy changes nothing. **Settings > Repair install** rewrites everything if the install breaks.
 
+## Using it
+
 Each browser syncs a few seconds after a bookmark change, when it starts, and whenever the program tells it another browser changed. A slow check every 10 minutes catches anything missed. The toolbar button shows the last sync, has **Sync now**, and opens the Bookmark Sync window.
 
-## Configuration
+## Settings
 
 Settings are in the window under **Settings**, and in `%LOCALAPPDATA%\BookmarkSync\config.json`.
 
@@ -59,16 +58,9 @@ Settings are in the window under **Settings**, and in `%LOCALAPPDATA%\BookmarkSy
 | `BrowserPriority` | `firefox,chrome,edge` | Order used when `MasterBrowser` is `auto`. |
 | `WindowLeft`, `WindowTop` | `-1` | Where the window was last placed. `-1` centres it. |
 
-Everything else lives in the same folder: `state.json` (master list and what each browser last had), `Backups\`, and `BookmarkSync.log`.
+## Where things are stored
 
-## Tests
-
-```
-cd app\Tests
-dotnet run
-```
-
-Covers the address rules, duplicates, merging between browsers, folder order, the master browser, backups and how long they are kept, restore, the settings file and the message format the browsers use.
+Settings: `%LOCALAPPDATA%\BookmarkSync\config.json`. Everything else lives in the same folder: `state.json` (master list and what each browser last had), `Backups\`, and `BookmarkSync.log`.
 
 ## Privacy
 
@@ -81,10 +73,29 @@ Bookmarks never leave this computer. The extension talks only to the Bookmark Sy
 | `alarms` | A slow safety check in case a message was missed. |
 | `storage` | Remember the last sync result for the toolbar button. |
 
-## Notes
+## Troubleshooting
 
 - New bookmarks are added at the end of their folder, so exact order is not synced.
 - The Firefox bookmarks menu and other bookmarks count as one area.
 - Removing Bookmark Sync: **Settings > Remove all app data**. It unregisters the helper, removes the shortcuts and sends the app folder to the Recycle Bin. Remove the extension from each browser yourself.
 
+## Build from source
+
+Run `build.cmd` (needs the .NET SDK for the program). It writes `BookmarkSync.exe` to the top folder, and `extension\chrome` (Chrome and Edge) and `extension\firefox` with a zip of each for the stores.
+
+Layout: `app\` program source, `extension\src\` and `extension\manifests\` extension source, `tests\`. The exe, the folder shortcut and the built extension folders are not kept in the repo.
+
+Tests:
+
+```
+cd app\Tests
+dotnet run
+```
+
+Covers the address rules, duplicates, merging between browsers, folder order, the master browser, backups and how long they are kept, restore, the settings file and the message format the browsers use.
+
 The extension's reorder step has its own check against a fake bookmarks API: `node tests/reorder.test.js`, also with `chrome` or `firefox` as an argument.
+
+## Licence
+
+MIT, see `LICENSE`.
