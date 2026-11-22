@@ -42,12 +42,13 @@ Each browser syncs a few seconds after a bookmark change, when it starts, and wh
 
 ## Settings
 
-Settings are in the window under **Settings**, and in `%LOCALAPPDATA%\BookmarkSync\config.json`.
+Settings are in the window under **Settings**, in three tabs (Sync, Backups, App), and in `%LOCALAPPDATA%\BookmarkSync\config.json`.
 
 | Setting | Default | What it does |
 | --- | --- | --- |
 | `RemoveDuplicates` | `false` | Delete duplicates: keep one copy of each address, preferring the bookmarks bar. |
 | `AskAboutDuplicates` | `true` | Ask before a new duplicate bookmark stays (only when duplicates are not deleted). |
+| `BackupFolder` | empty | Where backups are kept: any folder, including a cloud-synced folder or a network share. Empty means the app folder. Set it on the Backups tab of Settings (Browse). The folder is checked when you save, and existing backups can be copied over. |
 | `AutoBackupsToKeep` | `40` | How many before-a-change backups to keep per browser (5 to 500). Backups you make are always kept. |
 | `DailiesToKeep` | `7` | Daily backups to keep per browser. |
 | `WeekliesToKeep` | `4` | Weekly backups to keep per browser. |

@@ -21,6 +21,8 @@ namespace BookmarkSync
         public bool StartWithWindows = true;
         /// <summary>On: the close button hides the window to the tray and there is no minimise button. Off: both buttons show and close exits.</summary>
         public bool MinimiseToTray = true;
+        /// <summary>Where backups are kept (a local folder, a cloud-synced folder or a network share). Empty means the app folder.</summary>
+        public string BackupFolder = "";
         public int WindowLeft = -1;
         public int WindowTop = -1;
 
@@ -51,6 +53,7 @@ namespace BookmarkSync
                 config.BrowserPriority = Json.Str(Json.Get(root, "BrowserPriority"), config.BrowserPriority).Trim().ToLowerInvariant();
                 config.StartWithWindows = Json.Bool(Json.Get(root, "StartWithWindows"), config.StartWithWindows);
                 config.MinimiseToTray = Json.Bool(Json.Get(root, "MinimiseToTray"), config.MinimiseToTray);
+                config.BackupFolder = Json.Str(Json.Get(root, "BackupFolder"), config.BackupFolder).Trim();
                 config.WindowLeft = Json.Int(Json.Get(root, "WindowLeft"), config.WindowLeft);
                 config.WindowTop = Json.Int(Json.Get(root, "WindowTop"), config.WindowTop);
             }
@@ -88,6 +91,7 @@ namespace BookmarkSync
             d["BrowserPriority"] = BrowserPriority;
             d["StartWithWindows"] = StartWithWindows;
             d["MinimiseToTray"] = MinimiseToTray;
+            d["BackupFolder"] = BackupFolder;
             d["WindowLeft"] = WindowLeft;
             d["WindowTop"] = WindowTop;
             Env.WriteFileSafely(Env.ConfigFile, Json.Write(d));

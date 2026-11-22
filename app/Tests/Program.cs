@@ -281,6 +281,25 @@ namespace BookmarkSync.Tests
             catch (InvalidOperationException) { passes++; }
 
             // ---- Settings ----
+            // ---- Backup folder ----
+            string elsewhere = Path.Combine(scratch, "elsewhere", "bk");
+            Equal(null, Backups.CheckFolder(elsewhere), "a new backup folder can be made and written");
+            var folderConfig = Config.Load();
+            folderConfig.BackupFolder = elsewhere;
+            folderConfig.Save();
+            Equal(elsewhere, Env.BackupDir, "the chosen backup folder is used");
+            var snapForFolder = S(new[] { B("https://example.com/", P("toolbar")) });
+            State folderState = new State();
+            string madeName = Backups.Create(folderState, "manual", "all", snapForFolder);
+            Equal(true, File.Exists(Path.Combine(elsewhere, madeName + ".json")), "a backup is written to the chosen folder");
+            Equal(Path.Combine(scratch, "Backups"), Env.DefaultBackupDir, "the default backup folder stays in the app folder");
+            int copiedBack = Backups.CopyAll(elsewhere, Env.DefaultBackupDir);
+            Equal(true, copiedBack >= 2, "copying backups to another folder copies both files of each");
+            Equal(0, Backups.CopyAll(elsewhere, Env.DefaultBackupDir), "copying again leaves existing files alone");
+            folderConfig.BackupFolder = "";
+            folderConfig.Save();
+            File.Delete(Env.ConfigFile);
+
             Equal(true, new Config().MinimiseToTray, "minimise to tray is on by default");
             Equal(true, new Config().StartWithWindows, "start with Windows is on by default");
             File.Delete(Env.ConfigFile);

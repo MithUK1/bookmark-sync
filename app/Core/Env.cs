@@ -10,7 +10,7 @@ namespace BookmarkSync
     public static class Env
     {
         public const string AppTitle = "Bookmark Sync";
-        public const string AppVersion = "0.6.1";
+        public const string AppVersion = "0.7.0";
         /// <summary>The README on GitHub, which is the help for every setting.</summary>
         public const string HelpUrl = "https://github.com/MithUK1/bookmark-sync#readme";
         public const string HostName = "com.muk1.bookmarksync";
@@ -83,7 +83,17 @@ namespace BookmarkSync
         public static string StateFile { get { return Path.Combine(DataDir, "state.json"); } }
         public static string StatusFile { get { return Path.Combine(DataDir, "status.json"); } }
         public static string ConfigFile { get { return Path.Combine(DataDir, "config.json"); } }
-        public static string BackupDir { get { return Path.Combine(DataDir, "Backups"); } }
+        public static string DefaultBackupDir { get { return Path.Combine(DataDir, "Backups"); } }
+
+        /// <summary>The chosen backup folder, or the default one inside the app folder.</summary>
+        public static string BackupDir
+        {
+            get
+            {
+                string chosen = Config.Load().BackupFolder;
+                return string.IsNullOrEmpty(chosen) ? DefaultBackupDir : chosen;
+            }
+        }
         public static string PlanDir { get { return Path.Combine(DataDir, "Plans"); } }
         public static string LogPath { get { return Path.Combine(DataDir, "BookmarkSync.log"); } }
         public static string InstalledExe { get { return Path.Combine(DataDir, "BookmarkSync.exe"); } }

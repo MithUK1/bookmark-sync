@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Bookmark Sync",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "description": "Keeps bookmarks in step across Chrome, Edge and Firefox through the Bookmark Sync helper on this computer.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA3QuoB8AMnl0OHbv95cWa7z1c5N0dwBpUewIZx13BMCaVtKKiUcFoSIXY78FfFa672um+0CjS4pnDvJ9xd7huP+LSfr+qjHHmUmqRcMd8xpjspVy0T7S9sB+n76eIrWiVlem+5wMz+/f68X1LCwR0YhVw+Bn4tlBlc56povLwkqkBmZhR8ZqLJcTrAocBTuGlqNUpX/yP2cEUzGP+h8ugI3jXoI2K6AVJ+2IaxL5meBXVzQaKdhBbG4aS29gEteIrt9xVk1okJjOlAMENQXHSRBSaH3aBae3/OTYI2AYNPAnXK/eg0MM3ntvhntlNNSkQELS3gt4gU1g3SBwXgpgRWQIDAQAB",
   "permissions": ["bookmarks", "alarms", "storage", "nativeMessaging"],

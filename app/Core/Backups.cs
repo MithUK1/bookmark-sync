@@ -46,6 +46,39 @@ namespace BookmarkSync
             return name;
         }
 
+        /// <summary>Checks a folder can be used for backups: it exists or can be made, and a file can be written in it.</summary>
+        public static string CheckFolder(string folder)
+        {
+            try
+            {
+                Directory.CreateDirectory(folder);
+                string probe = Path.Combine(folder, ".bookmarksync-check-" + Guid.NewGuid().ToString("N"));
+                File.WriteAllText(probe, "check");
+                File.Delete(probe);
+                return null;
+            }
+            catch (Exception ex)
+            {
+                return ex.Message;
+            }
+        }
+
+        /// <summary>Copies the backups from one folder to another, leaving any that are already there. Returns how many files were copied.</summary>
+        public static int CopyAll(string from, string to)
+        {
+            int copied = 0;
+            if (!Directory.Exists(from)) return 0;
+            Directory.CreateDirectory(to);
+            foreach (string file in Directory.GetFiles(from, "bookmarks-*"))
+            {
+                string target = Path.Combine(to, Path.GetFileName(file));
+                if (File.Exists(target)) continue;
+                File.Copy(file, target);
+                copied++;
+            }
+            return copied;
+        }
+
         /// <summary>A fingerprint of a browser's bookmarks and order, to avoid saving the same backup twice.</summary>
         public static string Hash(Snap snapshot)
         {
