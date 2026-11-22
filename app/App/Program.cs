@@ -69,6 +69,24 @@ namespace BookmarkSync
             }
         }
 
+        /// <summary>Asks the running tray copy to show its window. Returns false when none is running.</summary>
+        public static bool SignalRunningCopy()
+        {
+            try
+            {
+                Native.AllowAnyForeground();
+                using (EventWaitHandle show = EventWaitHandle.OpenExisting("BookmarkSyncShow"))
+                {
+                    show.Set();
+                }
+                return true;
+            }
+            catch (WaitHandleCannotBeOpenedException)
+            {
+                return false;
+            }
+        }
+
         private static int RunHelper()
         {
             try
@@ -91,15 +109,7 @@ namespace BookmarkSync
                 if (!created)
                 {
                     // Already running: ask it to show its window.
-                    try
-                    {
-                        Native.AllowAnyForeground();
-                        using (EventWaitHandle show = EventWaitHandle.OpenExisting("BookmarkSyncShow")) show.Set();
-                    }
-                    catch (WaitHandleCannotBeOpenedException)
-                    {
-                        // It is still starting; nothing more to do.
-                    }
+                    SignalRunningCopy();
                     return 0;
                 }
                 Installer.CleanOldCopies();
