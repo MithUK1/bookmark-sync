@@ -48,7 +48,7 @@ namespace BookmarkSync
             icon.Icon = Theme.AppIcon;
             icon.Text = Env.AppTitle;
             icon.ContextMenuStrip = menu;
-            icon.DoubleClick += (s, e) => ShowWindow();
+            icon.MouseClick += (s, e) => { if (e.Button == MouseButtons.Left) ShowWindow(); };
             menu.Opening += (s, e) => BuildMenu();
             icon.Visible = true;
 
