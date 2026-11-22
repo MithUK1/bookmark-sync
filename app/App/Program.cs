@@ -5,11 +5,6 @@ using System.Windows.Forms;
 
 namespace BookmarkSync
 {
-    /// <summary>
-    /// One program, several roles chosen by how it is started: the browsers' helper (a browser passes
-    /// its extension address or the helper description file), --show and --tray for the window and
-    /// tray icon, and --uninstall.
-    /// </summary>
     /// <summary>The few Windows calls that let a second start bring the running window to the front.</summary>
     internal static class Native
     {
@@ -26,6 +21,11 @@ namespace BookmarkSync
         public static extern bool SetForegroundWindow(IntPtr handle);
     }
 
+    /// <summary>
+    /// One program, several roles chosen by how it is started: the browsers' helper (a browser passes
+    /// its extension address or the helper description file), --show and --tray for the window and
+    /// tray icon, and --uninstall.
+    /// </summary>
     public static class Program
     {
         [STAThread]
