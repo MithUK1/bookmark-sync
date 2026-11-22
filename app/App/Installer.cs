@@ -94,13 +94,30 @@ namespace BookmarkSync
         /// Installs or upgrades from the copy that was started, when it is not the installed one.
         /// Returns true when the installed copy has been started and this one should exit.
         /// </summary>
+        /// <summary>True when this exe is a different build from the installed one (same version, new checksum).</summary>
+        static bool DiffersFromInstalled()
+        {
+            try
+            {
+                string me = System.Windows.Forms.Application.ExecutablePath;
+                if (string.Equals(Path.GetFullPath(me), Path.GetFullPath(Env.InstalledExe), StringComparison.OrdinalIgnoreCase)) return false;
+                using (var sha = System.Security.Cryptography.SHA256.Create())
+                {
+                    byte[] a = sha.ComputeHash(File.ReadAllBytes(me));
+                    byte[] b = sha.ComputeHash(File.ReadAllBytes(Env.InstalledExe));
+                    return !System.Linq.Enumerable.SequenceEqual(a, b);
+                }
+            }
+            catch { return false; }
+        }
+
         public static bool InstallAndHandOver(bool force, out string note)
         {
             note = null;
             Version installed = InstalledVersion();
             Version mine = new Version(Env.AppVersion);
             bool missing = installed == null || !File.Exists(Env.InstalledExe);
-            bool upgrade = installed != null && mine > installed;
+            bool upgrade = installed != null && (mine > installed || (mine == installed && !missing && DiffersFromInstalled()));
             if (!force && !missing && !upgrade)
             {
                 // The same or an older copy changes nothing; just open the installed one.
