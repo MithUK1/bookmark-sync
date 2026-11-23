@@ -23,6 +23,8 @@ namespace BookmarkSync
         public bool MinimiseToTray = true;
         /// <summary>Where backups are kept (a local folder, a cloud-synced folder or a network share). Empty means the app folder.</summary>
         public string BackupFolder = "";
+        /// <summary>Extra Chrome or Edge extension ids the helper accepts (for example the id the Chrome Web Store assigns), comma separated.</summary>
+        public string ExtraExtensionIds = "";
         public int WindowLeft = -1;
         public int WindowTop = -1;
 
@@ -54,6 +56,7 @@ namespace BookmarkSync
                 config.StartWithWindows = Json.Bool(Json.Get(root, "StartWithWindows"), config.StartWithWindows);
                 config.MinimiseToTray = Json.Bool(Json.Get(root, "MinimiseToTray"), config.MinimiseToTray);
                 config.BackupFolder = Json.Str(Json.Get(root, "BackupFolder"), config.BackupFolder).Trim();
+                config.ExtraExtensionIds = Json.Str(Json.Get(root, "ExtraExtensionIds"), config.ExtraExtensionIds).Trim().ToLowerInvariant();
                 config.WindowLeft = Json.Int(Json.Get(root, "WindowLeft"), config.WindowLeft);
                 config.WindowTop = Json.Int(Json.Get(root, "WindowTop"), config.WindowTop);
             }
@@ -64,6 +67,26 @@ namespace BookmarkSync
             }
             config.Clamp();
             return config;
+        }
+
+        /// <summary>A Chrome extension id is 32 letters from a to p.</summary>
+        public static bool IsExtensionId(string id)
+        {
+            if (id == null || id.Length != 32) return false;
+            foreach (char c in id) if (c < 'a' || c > 'p') return false;
+            return true;
+        }
+
+        /// <summary>The valid ids in ExtraExtensionIds.</summary>
+        public List<string> ExtraIds()
+        {
+            var list = new List<string>();
+            foreach (string part in (ExtraExtensionIds ?? "").Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                string id = part.Trim().ToLowerInvariant();
+                if (IsExtensionId(id) && id != Env.ChromiumExtensionId && !list.Contains(id)) list.Add(id);
+            }
+            return list;
         }
 
         private void Clamp()
@@ -92,6 +115,7 @@ namespace BookmarkSync
             d["StartWithWindows"] = StartWithWindows;
             d["MinimiseToTray"] = MinimiseToTray;
             d["BackupFolder"] = BackupFolder;
+            d["ExtraExtensionIds"] = ExtraExtensionIds;
             d["WindowLeft"] = WindowLeft;
             d["WindowTop"] = WindowTop;
             Env.WriteFileSafely(Env.ConfigFile, Json.Write(d));

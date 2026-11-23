@@ -292,7 +292,12 @@ namespace BookmarkSync
             d["description"] = "Bookmarks Sync Plus helper";
             d["path"] = Env.InstalledExe;
             d["type"] = "stdio";
-            if (chromium) d["allowed_origins"] = new List<object> { "chrome-extension://" + Env.ChromiumExtensionId + "/" };
+            if (chromium)
+            {
+                var origins = new List<object> { "chrome-extension://" + Env.ChromiumExtensionId + "/" };
+                foreach (string id in Config.Load().ExtraIds()) origins.Add("chrome-extension://" + id + "/");
+                d["allowed_origins"] = origins;
+            }
             else d["allowed_extensions"] = new List<object> { Env.FirefoxExtensionId };
             return Json.Write(d);
         }

@@ -262,6 +262,10 @@ namespace BookmarkSync.Tests
             File.Delete(Env.StateFile);
             var first = Host.Handle(req);
             Equal(true, Json.Bool(Json.Get(first, "ok")), "host sync answers ok");
+            var idCfg = new Config { ExtraExtensionIds = "abcdefghijklmnopabcdefghijklmnop, nope, " + Env.ChromiumExtensionId };
+            Equal(1, idCfg.ExtraIds().Count, "only a valid extra extension id is kept, and not the built-in one");
+            Equal(true, Config.IsExtensionId("abcdefghijklmnopabcdefghijklmnop"), "a 32 letter a to p id is accepted");
+            Equal(false, Config.IsExtensionId("abcdefghijklmnopabcdefghijklmnoz"), "an id with other letters is refused");
             var hOld = Host.Handle(new Dictionary<string, object> { { "type", "hello" }, { "browser", "chrome" }, { "version", "0.0.1" } });
             Equal(true, hOld.ContainsKey("reload"), "an older extension is told to reload");
             var hSame = Host.Handle(new Dictionary<string, object> { { "type", "hello" }, { "browser", "chrome" }, { "version", Env.AppVersion } });

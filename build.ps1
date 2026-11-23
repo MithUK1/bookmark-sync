@@ -50,9 +50,29 @@ function New-BrowserBuild {
     Write-Host "Built $zip"
 }
 
+# The Chrome Web Store refuses a manifest that has a "key" field, so the store zip is the Chrome build without it.
+# The folder build (extension\chrome) keeps the key so its id stays fixed for Load unpacked.
+function New-StoreBuild {
+    param([string]$Version)
+    $source = Join-Path $ext 'chrome'
+    $target = Join-Path $ext 'chrome-store'
+    if (Test-Path $target) { Remove-Item -Path $target -Recurse -Force }
+    Copy-Item -Path $source -Destination $target -Recurse
+    $manifestPath = Join-Path $target 'manifest.json'
+    $manifest = Get-Content -Path $manifestPath -Raw | ConvertFrom-Json
+    $manifest.PSObject.Properties.Remove('key')
+    [System.IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding($false)))
+    $zip = Join-Path $ext "bookmark-sync-plus-chrome-store-$Version.zip"
+    if (Test-Path $zip) { Remove-Item -Path $zip -Force }
+    Compress-Archive -Path (Join-Path $target '*') -DestinationPath $zip
+    Remove-Item -Path $target -Recurse -Force
+    Write-Host "Built $zip (no key, for the Chrome Web Store)"
+}
+
 $version = Get-CheckedVersion
 New-BrowserBuild -Manifest 'chrome' -Folder 'chrome' -Version $version
 New-BrowserBuild -Manifest 'firefox' -Folder 'firefox' -Version $version
+New-StoreBuild -Version $version
 
 # The program: one exe built from app\BookmarkSync.csproj.
 if (Get-Command dotnet -ErrorAction SilentlyContinue) {

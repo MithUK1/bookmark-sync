@@ -20,7 +20,7 @@ namespace BookmarkSync
         public SetupForm()
         {
             Text = Env.AppTitle + " - Set up browsers";
-            ClientSize = new Size(500, 470);
+            ClientSize = new Size(500, 544);
             StartPosition = FormStartPosition.CenterParent;
             Theme.Chrome(this);
 
@@ -33,25 +33,27 @@ namespace BookmarkSync
             AddRow("edge", "Edge", @"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe", "chromium", "edge://extensions", 130, state);
             AddRow("firefox", "Firefox", @"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\firefox.exe", "firefox", "about:debugging#/runtime/this-firefox", 170, state);
 
-            Controls.Add(Theme.Heading("Steps", 16, 222));
+            AddStoreIdRow(214);
+            Controls.Add(Theme.Heading("Steps", 16, 262));
             Controls.Add(Theme.SmallPrint(
                 "Chrome and Edge: the folder path is copied for you. On the page that opens, turn on Developer mode, choose Load unpacked, paste the path and pick the folder. After a Bookmarks Sync Plus update, press Reload on the extension.\r\n\r\n" +
+                "Chrome Web Store version: copy the extension's ID from its store page or the extensions page, paste it next to Store ID and press Allow this ID.\r\n\r\n" +
                 "Firefox: put the signed Bookmarks Sync Plus .xpi file in the Bookmarks Sync Plus folder (Open folder) or next to the program, then press the button and accept the prompt. Without a signed file, Firefox only allows a temporary add-on: choose Load Temporary Add-on and pick manifest.json in the copied folder.",
-                16, 246, 468, 130));
+                16, 286, 468, 172));
 
             message.AutoSize = false;
-            message.Location = new Point(16, 372);
+            message.Location = new Point(16, 462);
             message.Size = new Size(468, 20);
             Controls.Add(message);
 
-            var folder = Theme.Button("Open folder", 16, 398, 110);
+            var folder = Theme.Button("Open folder", 16, 488, 110);
             folder.Click += (s, e) =>
             {
                 Directory.CreateDirectory(Env.DataDir);
                 Process.Start("explorer.exe", "\"" + Env.DataDir + "\"");
             };
             Controls.Add(folder);
-            var close = Theme.Button("Close", 374, 398);
+            var close = Theme.Button("Close", 374, 488);
             close.DialogResult = DialogResult.Cancel;
             Controls.Add(close);
             CancelButton = close;
@@ -74,6 +76,46 @@ namespace BookmarkSync
             var button = Theme.Button(working ? "Set up again" : "Set up " + name, 330, y, 154, primary: !working);
             button.Click += (s, e) => Setup(id, name, appPath, flavour, page);
             Controls.Add(button);
+        }
+
+        /// <summary>
+        /// When the extension comes from the Chrome Web Store it gets an id of its own, which the helper must be told
+        /// about before it will talk to it. Paste it here and the helper's registration is updated at once.
+        /// </summary>
+        private void AddStoreIdRow(int y)
+        {
+            Controls.Add(new Label { Text = "Store ID", AutoSize = true, Location = new Point(16, y + 6), Font = Theme.UiFontBold });
+            var box = new TextBox { Location = new Point(110, y + 4), Size = new Size(210, 24), MaxLength = 64 };
+            box.Text = string.Join(", ", Config.Load().ExtraIds().ToArray());
+            Controls.Add(box);
+            var add = Theme.Button("Allow this ID", 330, y, 154);
+            add.Click += (s, e) =>
+            {
+                try
+                {
+                    var ids = new List<string>();
+                    foreach (string part in box.Text.Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries))
+                    {
+                        string id = part.Trim().ToLowerInvariant();
+                        if (!Config.IsExtensionId(id))
+                        {
+                            SetMessage("'" + part + "' is not an extension id (32 letters, a to p).", Theme.WarningFg);
+                            return;
+                        }
+                        ids.Add(id);
+                    }
+                    Config config = Config.Load();
+                    config.ExtraExtensionIds = string.Join(",", ids.ToArray());
+                    config.Save();
+                    Installer.Sync(new List<string>());
+                    SetMessage(ids.Count == 0 ? "No extra ids are allowed." : "Allowed. Reload the extension in the browser.", Theme.OkFg);
+                }
+                catch (Exception ex)
+                {
+                    Theme.Error("Could not save the id. " + ex.Message);
+                }
+            };
+            Controls.Add(add);
         }
 
         private static string FindBrowser(string appPath)

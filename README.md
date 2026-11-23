@@ -32,6 +32,7 @@ Firefox: News                  Firefox: Recipes, News, Weather
 1. Run `BookmarkSync.exe` from the Bookmarks Sync Plus folder (or build it first, see Build from source). It installs itself for your user, no admin rights, registers the helper with each browser, adds a **Bookmarks Sync Plus** shortcut to the Desktop, the Start menu and the folder you ran it from (the Desktop and Start menu open the installed app, the folder one opens that copy so a newer download upgrades when you use it), starts with Windows, and opens the window.
 2. Click **Set up browsers** in the window. It keeps the extension files up to date in its own folder, opens each browser's extensions page and copies the folder path:
    - **Chrome and Edge:** turn on Developer mode, Load unpacked, paste the path. Browsers do not let a program add an extension from outside their store, so this one click is yours. After an update, press Reload on the extension.
+   - **From the Chrome Web Store:** the store gives the extension an ID of its own. Copy it, paste it next to **Store ID** in Set up browsers and press **Allow this ID** (or put it in `ExtraExtensionIds`), then reload the extension.
    - **Firefox:** sign the Firefox build as an unlisted add-on on addons.mozilla.org (free, no store listing), put the signed `.xpi` in the Bookmarks Sync Plus folder and press the Firefox button. Without a signed file, Firefox only allows a temporary add-on (about:debugging, Load Temporary Add-on, pick `manifest.json` in the copied folder), removed when Firefox restarts.
 
 **Updating:** run a newer `BookmarkSync.exe` the same way. It compares versions, changes only what differs (program file, browser registration, shortcuts, new settings) and says what it changed. Settings, bookmarks and backups are kept, and an older copy changes nothing. **Settings > Repair install** rewrites everything if the install breaks.
@@ -48,6 +49,7 @@ Settings are in the window under **Settings**, in three tabs (Sync, Backups, App
 | --- | --- | --- |
 | `RemoveDuplicates` | `false` | Delete duplicates: keep one copy of each address, preferring the bookmarks bar. |
 | `AskAboutDuplicates` | `true` | Ask before a new duplicate bookmark stays (only when duplicates are not deleted). |
+| `ExtraExtensionIds` | empty | Extra Chrome or Edge extension IDs the program accepts, separated by commas, such as the ID the Chrome Web Store assigns. Easiest through **Set up browsers**. |
 | `BackupFolder` | empty | Where backups are kept: any folder, including a cloud-synced folder or a network share. Empty means the app folder. Set it on the Backups tab of Settings (Browse). The folder is checked when you save, and existing backups can be copied over. |
 | `AutoBackupsToKeep` | `40` | How many before-a-change backups to keep per browser (5 to 500). Backups you make are always kept. |
 | `DailiesToKeep` | `7` | Daily backups to keep per browser. |
