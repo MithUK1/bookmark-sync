@@ -1,4 +1,4 @@
-# Bookmark Sync
+# Bookmarks Sync Plus
 
 Keeps your bookmarks the same in Chrome, Edge and Firefox, with one small program that sits in the tray.
 
@@ -29,16 +29,16 @@ Firefox: News                  Firefox: Recipes, News, Weather
 - Windows 10 or 11 (uses the .NET Framework 4.8 that comes with Windows).
 - [Google Chrome](https://www.google.com/chrome/), [Microsoft Edge](https://www.microsoft.com/edge) and/or [Firefox](https://www.mozilla.org/firefox/) 140 or newer.
 
-1. Run `BookmarkSync.exe` from the Bookmark Sync folder (or build it first, see Build from source). It installs itself for your user, no admin rights, registers the helper with each browser, adds a **Bookmark Sync** shortcut to the Desktop, the Start menu and the folder you ran it from (the Desktop and Start menu open the installed app, the folder one opens that copy so a newer download upgrades when you use it), starts with Windows, and opens the window.
+1. Run `BookmarkSync.exe` from the Bookmarks Sync Plus folder (or build it first, see Build from source). It installs itself for your user, no admin rights, registers the helper with each browser, adds a **Bookmarks Sync Plus** shortcut to the Desktop, the Start menu and the folder you ran it from (the Desktop and Start menu open the installed app, the folder one opens that copy so a newer download upgrades when you use it), starts with Windows, and opens the window.
 2. Click **Set up browsers** in the window. It keeps the extension files up to date in its own folder, opens each browser's extensions page and copies the folder path:
    - **Chrome and Edge:** turn on Developer mode, Load unpacked, paste the path. Browsers do not let a program add an extension from outside their store, so this one click is yours. After an update, press Reload on the extension.
-   - **Firefox:** sign the Firefox build as an unlisted add-on on addons.mozilla.org (free, no store listing), put the signed `.xpi` in the Bookmark Sync folder and press the Firefox button. Without a signed file, Firefox only allows a temporary add-on (about:debugging, Load Temporary Add-on, pick `manifest.json` in the copied folder), removed when Firefox restarts.
+   - **Firefox:** sign the Firefox build as an unlisted add-on on addons.mozilla.org (free, no store listing), put the signed `.xpi` in the Bookmarks Sync Plus folder and press the Firefox button. Without a signed file, Firefox only allows a temporary add-on (about:debugging, Load Temporary Add-on, pick `manifest.json` in the copied folder), removed when Firefox restarts.
 
 **Updating:** run a newer `BookmarkSync.exe` the same way. It compares versions, changes only what differs (program file, browser registration, shortcuts, new settings) and says what it changed. Settings, bookmarks and backups are kept, and an older copy changes nothing. **Settings > Repair install** rewrites everything if the install breaks.
 
 ## Using it
 
-Each browser syncs a few seconds after a bookmark change, when it starts, and whenever the program tells it another browser changed. A slow check every 10 minutes catches anything missed. The toolbar button shows the last sync, has **Sync now**, opens the Bookmark Sync window, and has a **Help** link (top right, opens this page) and a **?** that explains each part.
+Each browser syncs a few seconds after a bookmark change, when it starts, and whenever the program tells it another browser changed. A slow check every 10 minutes catches anything missed. The toolbar button shows the last sync, has **Sync now**, opens the Bookmarks Sync Plus window, and has a **Help** link (top right, opens this page) and a **?** that explains each part.
 
 ## Settings
 
@@ -66,12 +66,12 @@ Settings: `%LOCALAPPDATA%\BookmarkSync\config.json`. Everything else lives in th
 
 ## Privacy
 
-Bookmarks never leave this computer. The extension talks only to the Bookmark Sync helper installed on the same machine.
+Bookmarks never leave this computer. The extension talks only to the Bookmarks Sync Plus helper installed on the same machine.
 
 | Permission | Why |
 | --- | --- |
 | `bookmarks` | Read your bookmarks and change them to match the master list. |
-| `nativeMessaging` | Talk to the Bookmark Sync helper on this computer. |
+| `nativeMessaging` | Talk to the Bookmarks Sync Plus helper on this computer. |
 | `alarms` | A slow safety check in case a message was missed. |
 | `storage` | Remember the last sync result for the toolbar button. |
 
@@ -79,7 +79,7 @@ Bookmarks never leave this computer. The extension talks only to the Bookmark Sy
 
 - New bookmarks are added at the end of their folder, so exact order is not synced.
 - The Firefox bookmarks menu and other bookmarks count as one area.
-- Removing Bookmark Sync: **Settings > Remove all app data**. It unregisters the helper, removes the shortcuts and sends the app folder to the Recycle Bin. Remove the extension from each browser yourself.
+- Removing Bookmarks Sync Plus: **Settings > Remove all app data**. It unregisters the helper, removes the shortcuts and sends the app folder to the Recycle Bin. Remove the extension from each browser yourself.
 
 ## Build from source
 

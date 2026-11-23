@@ -25,7 +25,7 @@ namespace BookmarkSync
             Theme.Chrome(this);
 
             Controls.Add(Theme.Heading("Browsers", 16, 20));
-            Controls.Add(Theme.SmallPrint("Each button opens that browser's extensions page. Bookmark Sync keeps its extension files up to date in its own folder.", 16, 44, 468));
+            Controls.Add(Theme.SmallPrint("Each button opens that browser's extensions page. Bookmarks Sync Plus keeps its extension files up to date in its own folder.", 16, 44, 468));
 
             State state = null;
             try { state = State.Load(); } catch (Exception) { }
@@ -35,8 +35,8 @@ namespace BookmarkSync
 
             Controls.Add(Theme.Heading("Steps", 16, 222));
             Controls.Add(Theme.SmallPrint(
-                "Chrome and Edge: the folder path is copied for you. On the page that opens, turn on Developer mode, choose Load unpacked, paste the path and pick the folder. After a Bookmark Sync update, press Reload on the extension.\r\n\r\n" +
-                "Firefox: put the signed Bookmark Sync .xpi file in the Bookmark Sync folder (Open folder) or next to the program, then press the button and accept the prompt. Without a signed file, Firefox only allows a temporary add-on: choose Load Temporary Add-on and pick manifest.json in the copied folder.",
+                "Chrome and Edge: the folder path is copied for you. On the page that opens, turn on Developer mode, choose Load unpacked, paste the path and pick the folder. After a Bookmarks Sync Plus update, press Reload on the extension.\r\n\r\n" +
+                "Firefox: put the signed Bookmarks Sync Plus .xpi file in the Bookmarks Sync Plus folder (Open folder) or next to the program, then press the button and accept the prompt. Without a signed file, Firefox only allows a temporary add-on: choose Load Temporary Add-on and pick manifest.json in the copied folder.",
                 16, 246, 468, 130));
 
             message.AutoSize = false;

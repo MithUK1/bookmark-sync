@@ -9,10 +9,10 @@ namespace BookmarkSync
     /// <summary>Names, paths and small file helpers shared by every part of the program.</summary>
     public static class Env
     {
-        public const string AppTitle = "Bookmark Sync";
-        public const string AppVersion = "1.0.1";
+        public const string AppTitle = "Bookmarks Sync Plus";
+        public const string AppVersion = "1.0.2";
         /// <summary>The README on GitHub, which is the help for every setting.</summary>
-        public const string HelpUrl = "https://github.com/MithUK1/bookmark-sync#readme";
+        public const string HelpUrl = "https://github.com/MithUK1/bookmark-sync-plus#readme";
         public const string HostName = "com.muk1.bookmarksync";
         public const string ChromiumExtensionId = "kmajebfppgghbdedpfacpckkimnclejj";
         public const string FirefoxExtensionId = "bookmark-sync@muk1";
@@ -174,7 +174,7 @@ namespace BookmarkSync
                     // The last holder exited without letting go. The lock is ours now.
                     held = true;
                 }
-                if (!held) throw new TimeoutException("Bookmark Sync is busy with another browser, try again in a moment.");
+                if (!held) throw new TimeoutException("Bookmarks Sync Plus is busy with another browser, try again in a moment.");
                 try
                 {
                     return action();

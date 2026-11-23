@@ -1,5 +1,5 @@
-// Bookmark Sync popup: last sync result, Sync now, and a button that
-// opens the Bookmark Sync window on this computer.
+// Bookmarks Sync Plus popup: last sync result, Sync now, and a button that
+// opens the Bookmarks Sync Plus window on this computer.
 
 const api = globalThis.browser ?? globalThis.chrome;
 const HOST = 'com.muk1.bookmarksync';
@@ -31,7 +31,7 @@ document.getElementById('open').addEventListener('click', async () => {
     window.close();
   } catch {
     const box = document.getElementById('status');
-    box.textContent = 'Bookmark Sync is not installed on this computer. Run BookmarkSync.exe once to install it.';
+    box.textContent = 'Bookmarks Sync Plus is not installed on this computer. Run BookmarkSync.exe once to install it.';
     box.className = 'status bad';
   }
 });

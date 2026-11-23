@@ -64,7 +64,7 @@ namespace BookmarkSync
             catch (Exception ex)
             {
                 Env.Log("Start-up failed: " + ex);
-                MessageBox.Show("Bookmark Sync could not start.\r\n\r\n" + ex.Message, Env.AppTitle, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show("Bookmarks Sync Plus could not start.\r\n\r\n" + ex.Message, Env.AppTitle, MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return 1;
             }
         }

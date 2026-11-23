@@ -1,6 +1,6 @@
-// Bookmark Sync background script.
+// Bookmarks Sync Plus background script.
 //
-// Sends this browser's bookmarks to the Bookmark Sync helper on this
+// Sends this browser's bookmarks to the Bookmarks Sync Plus helper on this
 // computer, gets the master list back and changes this browser's bookmarks
 // to match. The browser keeps one connection open to the helper, which
 // watches for changes made by the other browsers and tells this one the
@@ -195,7 +195,7 @@ function connect() {
     else entry.resolve(message);
   });
   opened.onDisconnect.addListener(() => {
-    const reason = api.runtime.lastError?.message ?? 'The connection to Bookmark Sync closed';
+    const reason = api.runtime.lastError?.message ?? 'The connection to Bookmarks Sync Plus closed';
     if (port === opened) port = null;
     for (const [id, entry] of waiting) {
       clearTimeout(entry.timeout);
@@ -225,7 +225,7 @@ function callHost(message) {
     const id = nextId++;
     const timeout = setTimeout(() => {
       waiting.delete(id);
-      reject(new Error('Bookmark Sync did not answer'));
+      reject(new Error('Bookmarks Sync Plus did not answer'));
     }, REQUEST_TIMEOUT_MS);
     waiting.set(id, { resolve, reject, timeout });
     try {
@@ -450,9 +450,9 @@ async function removeEmptyFolders(wantedFolders, stats) {
 function describeError(err) {
   const text = String(err?.message ?? err);
   if (/not found|no such native application|not installed/i.test(text)) {
-    return 'Bookmark Sync is not installed on this computer. Run BookmarkSync.exe once to install it.';
+    return 'Bookmarks Sync Plus is not installed on this computer. Run BookmarkSync.exe once to install it.';
   }
-  return `Bookmark Sync could not sync: ${text}`;
+  return `Bookmarks Sync Plus could not sync: ${text}`;
 }
 
 // Saves the last result for the popup and shows a red ! on failure.
@@ -613,7 +613,7 @@ api.alarms.onAlarm.addListener((alarm) => {
 try {
   connect();
 } catch (err) {
-  console.warn('Bookmark Sync helper not reachable', err);
+  console.warn('Bookmarks Sync Plus helper not reachable', err);
 }
 api.runtime.onStartup.addListener(() => sync(true));
 api.runtime.onInstalled.addListener(() => sync(true));

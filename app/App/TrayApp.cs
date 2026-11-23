@@ -61,7 +61,7 @@ namespace BookmarkSync
             string note = Installer.TakeStartupNote();
             if (note != null)
             {
-                icon.ShowBalloonTip(6000, Env.AppTitle, "Bookmark Sync " + note + ".", ToolTipIcon.Info);
+                icon.ShowBalloonTip(6000, Env.AppTitle, "Bookmarks Sync Plus " + note + ".", ToolTipIcon.Info);
                 showWindow = true;
             }
             if (showWindow) ShowWindow();
@@ -104,7 +104,7 @@ namespace BookmarkSync
         private void BuildMenu()
         {
             menu.Items.Clear();
-            var open = new ToolStripMenuItem("Open Bookmark Sync") { Font = new Font(menu.Font, FontStyle.Bold) };
+            var open = new ToolStripMenuItem("Open Bookmarks Sync Plus") { Font = new Font(menu.Font, FontStyle.Bold) };
             open.Click += (s, e) => ShowWindow();
             menu.Items.Add(open);
             menu.Items.Add(new ToolStripSeparator());

@@ -123,7 +123,7 @@ namespace BookmarkSync
             {
                 using (var dialog = new FolderBrowserDialog())
                 {
-                    dialog.Description = "Choose where Bookmark Sync keeps its backups. A cloud-synced folder or a network share works.";
+                    dialog.Description = "Choose where Bookmarks Sync Plus keeps its backups. A cloud-synced folder or a network share works.";
                     dialog.SelectedPath = backupFolder.Text;
                     if (dialog.ShowDialog(this) == DialogResult.OK) backupFolder.Text = dialog.SelectedPath;
                 }
@@ -197,7 +197,7 @@ namespace BookmarkSync
             var remove = Theme.Button("Remove all app data", 140, 240, 160, warning: true);
             remove.Click += (s, e) => RemoveEverything();
             page.Controls.Add(remove);
-            page.Controls.Add(Theme.SmallPrint("Repair rewrites the browser registration and shortcuts. Remove takes Bookmark Sync off this computer.", 12, 276, 380));
+            page.Controls.Add(Theme.SmallPrint("Repair rewrites the browser registration and shortcuts. Remove takes Bookmarks Sync Plus off this computer.", 12, 276, 380));
             return page;
         }
 
@@ -270,7 +270,7 @@ namespace BookmarkSync
 
         private void RemoveEverything()
         {
-            string message = "This takes Bookmark Sync off this computer:\r\n\r\n" +
+            string message = "This takes Bookmarks Sync Plus off this computer:\r\n\r\n" +
                 "- the browsers stop being able to sync (remove the extension yourself)\r\n" +
                 "- the Desktop, Start menu and Startup shortcuts are removed\r\n" +
                 "- the app folder, including backups kept in it, goes to the Recycle Bin\r\n" +

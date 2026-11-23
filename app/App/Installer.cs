@@ -250,6 +250,7 @@ namespace BookmarkSync
             }
 
             WriteExtensions(changes);
+            RemoveOldNamedShortcuts(changes);
 
             Config config = Config.Load();
             string exe = Env.InstalledExe;
@@ -264,11 +265,31 @@ namespace BookmarkSync
             if (!RunningInstalledCopy) SetShortcut(Path.GetDirectoryName(SelfPath), SelfPath, "--show", changes);
         }
 
+        /// <summary>The app used to be called Bookmark Sync; its shortcuts would otherwise be left behind next to the new ones.</summary>
+        private static void RemoveOldNamedShortcuts(List<string> changes)
+        {
+            foreach (string folder in new[]
+            {
+                Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
+                Environment.GetFolderPath(Environment.SpecialFolder.Programs),
+                Environment.GetFolderPath(Environment.SpecialFolder.Startup),
+                Path.GetDirectoryName(SelfPath)
+            })
+            {
+                try
+                {
+                    string old = Path.Combine(folder, "Bookmark Sync.lnk");
+                    if (File.Exists(old)) { File.Delete(old); if (!changes.Contains("shortcuts")) changes.Add("shortcuts"); }
+                }
+                catch (Exception) { }
+            }
+        }
+
         private static string Manifest(bool chromium)
         {
             var d = new Dictionary<string, object>();
             d["name"] = Env.HostName;
-            d["description"] = "Bookmark Sync helper";
+            d["description"] = "Bookmarks Sync Plus helper";
             d["path"] = Env.InstalledExe;
             d["type"] = "stdio";
             if (chromium) d["allowed_origins"] = new List<object> { "chrome-extension://" + Env.ChromiumExtensionId + "/" };
@@ -289,7 +310,7 @@ namespace BookmarkSync
             link.Arguments = arguments;
             link.WorkingDirectory = Path.GetDirectoryName(target);
             link.IconLocation = target + ",0";
-            link.Description = "Open Bookmark Sync";
+            link.Description = "Open Bookmarks Sync Plus";
             link.Save();
             if (!changes.Contains("shortcuts")) changes.Add("shortcuts");
         }
@@ -304,7 +325,7 @@ namespace BookmarkSync
         }
 
         /// <summary>
-        /// Takes Bookmark Sync off this computer: registration, shortcuts, startup entry, and the data
+        /// Takes Bookmarks Sync Plus off this computer: registration, shortcuts, startup entry, and the data
         /// folder (backups included) to the Recycle Bin. The running exe is removed a moment later.
         /// </summary>
         public static void Uninstall()

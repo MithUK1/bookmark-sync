@@ -175,7 +175,7 @@ namespace BookmarkSync
             return reply;
         }
 
-        /// <summary>Opens the Bookmark Sync window, through the installed copy if there is one.</summary>
+        /// <summary>Opens the Bookmarks Sync Plus window, through the installed copy if there is one.</summary>
         private static void OpenWindow()
         {
             string exe = File.Exists(Env.InstalledExe) ? Env.InstalledExe : System.Reflection.Assembly.GetExecutingAssembly().Location;

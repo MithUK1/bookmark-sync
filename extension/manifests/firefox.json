@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Bookmark Sync",
-  "version": "1.0.1",
-  "description": "Keeps bookmarks in step across Chrome, Edge and Firefox through the Bookmark Sync helper on this computer.",
+  "name": "Bookmarks Sync Plus",
+  "version": "1.0.2",
+  "description": "Keeps bookmarks in step across Chrome, Edge and Firefox through the Bookmarks Sync Plus helper on this computer.",
   "browser_specific_settings": {
     "gecko": {
       "id": "bookmark-sync@muk1",
@@ -21,7 +21,7 @@
     "scripts": ["background.js"]
   },
   "action": {
-    "default_title": "Bookmark Sync",
+    "default_title": "Bookmarks Sync Plus",
     "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon16.png",

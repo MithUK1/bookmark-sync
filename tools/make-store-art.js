@@ -17,8 +17,8 @@ const BASE = `<style>*{box-sizing:border-box}body{margin:0;font-family:Inter,sys
 const mock = (status) => `
   const store = { status: ${JSON.stringify(status)} };
   globalThis.chrome = {
-    runtime: { getManifest: () => ({ version: '1.0.1' }), getURL: (p) => p,
-      sendMessage: async () => {}, sendNativeMessage: async () => ({ version: '1.0.1' }) },
+    runtime: { getManifest: () => ({ version: '1.0.2' }), getURL: (p) => p,
+      sendMessage: async () => {}, sendNativeMessage: async () => ({ version: '1.0.2' }) },
     storage: { local: { get: async (k) => ({ status: store.status }) }, onChanged: { addListener() {} } },
   };`;
 
@@ -64,14 +64,14 @@ const card = (uri, w) => `<img src="${uri}" style="width:${w}px;border-radius:14
   await render(browser, `<html><head>${BASE}</head><body style="${BG}width:1400px;height:560px">
     <img src="${iconUri}" style="position:absolute;left:90px;top:70px;width:104px;height:104px;border-radius:24px">
     <div style="position:absolute;left:216px;top:104px;font-size:30px;font-weight:500;color:#c0cdf5">Chrome, Edge and Firefox</div>
-    <div style="position:absolute;left:90px;top:206px;font-size:84px;font-weight:800;line-height:1.02;letter-spacing:-2px">Bookmark<br>Sync</div>
+    <div style="position:absolute;left:90px;top:206px;font-size:78px;font-weight:800;line-height:1.02;letter-spacing:-2px">Bookmarks<br>Sync Plus</div>
     <div style="position:absolute;left:90px;top:398px;font-size:30px;color:#c9d6ff">Keep your bookmarks the same in every browser.</div>
     <div style="position:absolute;left:90px;top:456px">${chips}</div>
     <div style="position:absolute;left:830px;top:70px">${card(popupOk, 420)}</div></body></html>`, 1400, 560, path.join(out, 'promo-marquee-1400x560.png'));
 
   await render(browser, `<html><head>${BASE}</head><body style="${BG}width:440px;height:280px">
     <img src="${iconUri}" style="position:absolute;left:30px;top:34px;width:72px;height:72px;border-radius:17px">
-    <div style="position:absolute;left:30px;top:124px;font-size:44px;font-weight:800;line-height:1.03;letter-spacing:-1px">Bookmark<br>Sync</div>
+    <div style="position:absolute;left:30px;top:124px;font-size:44px;font-weight:800;line-height:1.03;letter-spacing:-1px">Bookmarks<br>Sync Plus</div>
     <div style="position:absolute;left:30px;top:228px;font-size:17px;color:#c9d6ff">Same bookmarks in every browser</div></body></html>`, 440, 280, path.join(out, 'promo-tile-440x280.png'));
 
   await render(browser, `<html><body style="margin:0;background:transparent"><img src="${iconUri}" style="width:512px;height:512px;display:block"></body></html>`, 512, 512, path.join(out, 'icon-512.png'));

@@ -24,7 +24,7 @@ const api={bookmarks:{
  onCreated:{addListener(){}},onRemoved:{addListener(){}},onChanged:{addListener(){}},onMoved:{addListener(){}},onImportEnded:{addListener(){}}},
  alarms:{create(){},get:async()=>null,onAlarm:{addListener(){}}},
  storage:{local:{set:async()=>{},get:async()=>({})}},
- windows:{onRemoved:{addListener(){}},create:async()=>({id:1})},action:{},runtime:{getManifest(){return{version:"1.0.1"}},onStartup:{addListener(){}},onInstalled:{addListener(){}},onMessage:{addListener(){}},sendNativeMessage:async()=>{},connectNative(){return{onMessage:{addListener(){}},onDisconnect:{addListener(){}},postMessage(){}}}}};
+ windows:{onRemoved:{addListener(){}},create:async()=>({id:1})},action:{},runtime:{getManifest(){return{version:"1.0.2"}},onStartup:{addListener(){}},onInstalled:{addListener(){}},onMessage:{addListener(){}},sendNativeMessage:async()=>{},connectNative(){return{onMessage:{addListener(){}},onDisconnect:{addListener(){}},postMessage(){}}}}};
 api.runtime.getBrowserInfo=async()=>({});
 const ctx={chrome:api,...(firefox?{browser:api}:{}),navigator:{userAgent:'Chrome'},URL,atob,TextDecoder,console,setTimeout,clearTimeout};
 ctx.globalThis=ctx;vm.createContext(ctx);

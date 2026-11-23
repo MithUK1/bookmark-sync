@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Builds the Bookmark Sync program and the extension for each browser.
+    Builds the Bookmarks Sync Plus program and the extension for each browser.
 
 .DESCRIPTION
     Copies extension\src\ with the matching manifest into extension\chrome
@@ -44,7 +44,7 @@ function New-BrowserBuild {
     Copy-Item -Path (Join-Path $ext 'src\*') -Destination $target -Recurse
     Copy-Item -Path (Join-Path $ext "manifests\$Manifest.json") -Destination (Join-Path $target 'manifest.json')
 
-    $zip = Join-Path $ext "bookmark-sync-$Folder-$Version.zip"
+    $zip = Join-Path $ext "bookmark-sync-plus-$Folder-$Version.zip"
     if (Test-Path $zip) { Remove-Item -Path $zip -Force }
     Compress-Archive -Path (Join-Path $target '*') -DestinationPath $zip
     Write-Host "Built $zip"
