@@ -68,12 +68,55 @@ Settings: `%LOCALAPPDATA%\BookmarkSync\config.json`. Everything else lives in th
 
 ## Privacy
 
-Bookmarks never leave this computer. The extension talks only to the Bookmarks Sync Plus helper installed on the same machine.
+**Privacy policy for the Bookmarks Sync Plus extension and program. Last updated 24 November 2026.**
+
+Bookmarks Sync Plus is made by MithUK1. It is a browser extension plus a Windows program that run only on your own computer. There is no account, no server, no analytics and no advertising.
+
+### What data is handled
+
+- **Bookmarks**: the titles, web addresses and folder layout of your bookmarks, in each browser you set up (Chrome, Edge, Firefox). This is the only user data the product touches.
+- **Settings**: your choices in the program window, such as master browser, duplicate handling and backup retention.
+- **Technical status**: which browsers have connected and when, and the result of the last sync.
+
+The product does not collect or read your browsing history, open tabs, page contents, passwords, cookies, personal details, location or any account information.
+
+### How the data is used
+
+Bookmarks are read from one browser and written to the others so that they match. They are also saved as backup files so that you can restore them. They are used for nothing else.
+
+### Where the data is stored
+
+- **On your computer only.** The program keeps its files in `%LOCALAPPDATA%\BookmarkSync` (the master list, settings, status and, by default, the backups). You can choose a different backup folder in the program's Settings.
+- The extension keeps only the last sync result and the time it last reloaded itself, in the browser's own extension storage.
+- Backup files are ordinary bookmark files that you can open or delete at any time.
+
+### How the data is shared
+
+- Bookmarks pass between the extension and the program on the same computer using the browser's native messaging. They do not leave the computer.
+- Nothing is sent to the developer, to any server, or to any third party. The extension and program make no network requests, and nothing is sold, rented or used for advertising, profiling or credit decisions.
+- The extension uses no remote code.
+
+### Your control
+
+- Delete backups or the backup folder yourself at any time.
+- **Settings > Remove all app data** unregisters the program from the browsers, removes the shortcuts and sends the program folder to the Recycle Bin.
+- Removing the extension from a browser stops it reading that browser's bookmarks. Your bookmarks in the browser are left as they are.
+- If you use a browser's own sync (for example a Google or Firefox account), that is run by the browser maker under their policy, not by this product.
+
+### Children
+
+The product is not directed at children and does not knowingly collect any data from anyone.
+
+### Changes and contact
+
+If this policy changes, the new text will replace this section with a new date. Questions or requests: open an issue at https://github.com/MithUK1/bookmark-sync-plus/issues.
+
+### Permissions the extension asks for
 
 | Permission | Why |
 | --- | --- |
 | `bookmarks` | Read your bookmarks and change them to match the master list. |
-| `nativeMessaging` | Talk to the Bookmarks Sync Plus helper on this computer. |
+| `nativeMessaging` | Talk to the Bookmarks Sync Plus program on this computer. |
 | `alarms` | A slow safety check in case a message was missed. |
 | `storage` | Remember the last sync result for the toolbar button. |
 
